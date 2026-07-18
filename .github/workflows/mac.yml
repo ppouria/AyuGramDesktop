@@ -3,6 +3,8 @@ name: Build macOS
 on:
   workflow_dispatch:
   push:
+    branches: [dev]
+    tags: ['v*']
     paths-ignore:
       - 'docs/**'
       - '**.md'
