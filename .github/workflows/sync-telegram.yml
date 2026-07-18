@@ -1,0 +1,78 @@
+name: Sync Telegram upstream
+
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: sync-telegram-dev
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Mirror and merge Telegram dev
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git remote add telegram https://github.com/telegramdesktop/tdesktop.git
+          git fetch telegram dev
+          git fetch origin dev
+
+          if git ls-remote --exit-code origin refs/heads/upstream/telegram-dev >/dev/null; then
+            git fetch origin refs/heads/upstream/telegram-dev:refs/remotes/origin/upstream/telegram-dev
+          fi
+          git push --force-with-lease origin telegram/dev:refs/heads/upstream/telegram-dev
+
+          if git merge-base --is-ancestor telegram/dev origin/dev; then
+            echo 'Telegram dev is already included in dev.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          git switch --force-create sync/telegram-dev origin/dev
+          if ! git merge --no-ff --no-edit telegram/dev; then
+            conflicts="$(git diff --name-only --diff-filter=U)"
+            git merge --abort
+            body="$(printf 'The scheduled merge of `telegramdesktop/tdesktop:dev` into `dev` needs manual conflict resolution.\n\nConflicting paths:\n\n```text\n%s\n```\n\nFollow `docs/upstream-sync.md` to finish the merge.' "$conflicts")"
+            issue="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search 'Telegram upstream sync conflicts in:title' --json number --jq '.[0].number // empty')"
+            if [[ -n "$issue" ]]; then
+              gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --body "$body"
+            else
+              gh issue create --repo "$GITHUB_REPOSITORY" --title 'Telegram upstream sync conflicts' --body "$body"
+            fi
+            printf '## Telegram sync needs manual resolution\n\n```text\n%s\n```\n' "$conflicts" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          if git ls-remote --exit-code origin refs/heads/sync/telegram-dev >/dev/null; then
+            git fetch origin refs/heads/sync/telegram-dev:refs/remotes/origin/sync/telegram-dev
+          fi
+          git push --force-with-lease origin HEAD:refs/heads/sync/telegram-dev
+
+          pr="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base dev --head sync/telegram-dev --json number --jq '.[0].number // empty')"
+          if [[ -z "$pr" ]]; then
+            gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
+              --base dev \
+              --head sync/telegram-dev \
+              --title 'Sync Telegram Desktop dev' \
+              --body 'This pull request merges the latest Telegram Desktop `dev` into AyuGram. It was generated automatically by an AI-authored workflow; review and platform builds are required before merging.'
+          fi
+
+          issue="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search 'Telegram upstream sync conflicts in:title' --json number --jq '.[0].number // empty')"
+          if [[ -n "$issue" ]]; then
+            gh issue close "$issue" --repo "$GITHUB_REPOSITORY" --comment 'The latest upstream merge completed without conflicts.'
+          fi
