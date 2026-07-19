@@ -62,5 +62,12 @@ set(desktop_app_skip_libs
     variant
 )
 
+if (POLICY CMP0218)
+    cmake_policy(PUSH)
+    cmake_policy(SET CMP0218 OLD)
+endif()
 add_subdirectory(cmake)
+if (POLICY CMP0218)
+    cmake_policy(POP)
+endif()
 add_subdirectory(Telegram)
