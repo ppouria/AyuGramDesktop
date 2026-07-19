@@ -478,7 +478,7 @@ HistoryItem::HistoryItem(
 	.shortcutId = data.vquick_reply_shortcut_id().value_or_empty(),
 	.starsPaid = int(data.vpaid_message_stars().value_or_empty()),
 	.effectId = data.veffect().value_or_empty(),
-	.ayuNoForwards = data.is_noforwards(),
+	.ayuNoForwards = data.is_ayuNoforwards(),
 }) {
 	_boostsApplied = data.vfrom_boosts_applied().value_or_empty();
 
@@ -2578,7 +2578,7 @@ void HistoryItem::applySentMessage(const MTPDmessage &data) {
 }
 
 void HistoryItem::updateSentContent(const MTPDmessage &data) {
-	_ayuNoForwards = data.is_noforwards();
+	_ayuNoForwards = data.is_ayuNoforwards();
 	updateSentContent({
 		qs(data.vmessage()),
 		Api::EntitiesFromMTP(
