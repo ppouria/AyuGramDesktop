@@ -25,11 +25,13 @@ add_subdirectory(codegen)
 add_subdirectory(lib_icu)
 # AyuGram filters
 
+if (MSVC)
+    target_compile_options(icu_regex_minimal PRIVATE /wd4996)
+else()
+    target_compile_options(icu_regex_minimal PRIVATE -Wno-deprecated-declarations)
+endif()
 if (APPLE)
-    target_compile_options(icu_regex_minimal PRIVATE
-        -Wno-deprecated-declarations
-        -Wno-shorten-64-to-32
-    )
+    target_compile_options(icu_regex_minimal PRIVATE -Wno-shorten-64-to-32)
 endif()
 
 get_filename_component(src_loc SourceFiles REALPATH)
