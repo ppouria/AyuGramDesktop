@@ -25,6 +25,10 @@ add_subdirectory(codegen)
 add_subdirectory(lib_icu)
 # AyuGram filters
 
+if (APPLE)
+    target_compile_options(icu_regex_minimal PRIVATE -Wno-shorten-64-to-32)
+endif()
+
 get_filename_component(src_loc SourceFiles REALPATH)
 get_filename_component(res_loc Resources REALPATH)
 
@@ -2480,6 +2484,7 @@ if (MSVC)
     target_link_libraries(Telegram
     PRIVATE
         delayimp
+        dnsapi
     )
     target_link_options(Telegram
     PRIVATE
