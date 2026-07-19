@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "intro/intro_widget.h"
 
+#include "intro/intro_start.h"
 #include "intro/intro_phone.h"
 #include "intro/intro_qr.h"
 #include "intro/intro_code.h"
@@ -73,10 +74,14 @@ Widget::Widget(
 	QWidget *parent,
 	not_null<Window::Controller*> controller,
 	not_null<Main::Account*> account,
-	EnterPoint point)
+	EnterPoint point,
+	Main::Account *accountBeforeIntro)
 : RpWidget(parent)
 , _account(account)
-, _data(details::Data{ .controller = controller })
+, _data(details::Data{
+	.controller = controller,
+	.accountBeforeIntro = base::make_weak(accountBeforeIntro),
+})
 , _nextStyle(&st::introNextButton)
 , _back(this, object_ptr<Ui::IconButton>(this, st::introBackButton))
 , _settings(
@@ -105,6 +110,10 @@ Widget::Widget(
 	}, lifetime());
 
 	switch (point) {
+	case EnterPoint::Start:
+		getNearestDC();
+		appendStep(new StartWidget(this, _account, getData()));
+		break;
 	case EnterPoint::Phone:
 		appendStep(new PhoneWidget(this, _account, getData()));
 		break;
@@ -613,9 +622,9 @@ void Widget::resetAccount() {
 			} else if (type == u"2FA_RECENT_CONFIRM"_q) {
 				Ui::show(Ui::MakeInformBox(
 					tr::lng_signin_reset_cancelled()));
-			} else {
+			} else if (!MTP::IgnoreError(error)) {
 				getData()->controller->hideLayer();
-				getStep()->showError(rpl::single(Lang::Hard::ServerError()));
+				getStep()->showError(rpl::single(type));
 			}
 		}).send();
 	});
@@ -886,14 +895,18 @@ void Widget::keyPressEvent(QKeyEvent *e) {
 }
 
 void Widget::backRequested() {
+	const auto back = getData()->accountBeforeIntro.get();
 	if (_stepHistory.size() > 1) {
 		historyMove(StackAction::Back, Animate::Back);
+	} else if (back && back->sessionExists()) {
+		Core::App().setActivePrimaryWindow(getData()->controller);
+		back->domain().activate(back);
 	} else if (const auto parent
 		= Core::App().domain().maybeLastOrSomeAuthedAccount()) {
 		Core::App().domain().activate(parent);
 	} else {
 		moveToStep(
-			Ui::CreateChild<QrWidget>(this, _account, getData()),
+			Ui::CreateChild<StartWidget>(this, _account, getData()),
 			StackAction::Replace,
 			Animate::Back);
 	}

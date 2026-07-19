@@ -52,6 +52,8 @@ struct Data {
 	// Required for the UserpicButton.
 	const not_null<Window::Controller*> controller;
 
+	base::weak_ptr<Main::Account> accountBeforeIntro;
+
 	QString country;
 	QString phone;
 	QByteArray phoneHash;
@@ -92,6 +94,7 @@ class Step;
 } // namespace details
 
 enum class EnterPoint : uchar {
+	Start,
 	Phone,
 	Qr,
 };
@@ -105,7 +108,8 @@ public:
 		QWidget *parent,
 		not_null<Window::Controller*> controller,
 		not_null<Main::Account*> account,
-		EnterPoint point);
+		EnterPoint point,
+		Main::Account *accountBeforeIntro);
 	~Widget();
 
 	void showAnimated(QPixmap oldContentCache, bool back = false);

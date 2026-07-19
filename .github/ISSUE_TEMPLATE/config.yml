@@ -1,11 +1,17 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Platform-wide issue
+  - name: Platform-wide Telegram issue
     url: https://bugs.telegram.org
-    about: Any bug report or feature request affecting more than only Telegram Desktop.
-  - name: Issue of other client
+    about: Report issues that are not exclusive to AyuGram Desktop.
+  - name: Issue in another client
     url: https://bugs.telegram.org
-    about: Any bug report or feature request not about Telegram Desktop.
-  - name: Question
+    about: Report issues that do not occur in AyuGram Desktop.
+  - name: Translation error
+    url: https://translations.telegram.org
+    about: Suggest fixes for crowdsourced Telegram translations.
+  - name: Banned account or login problem
+    url: https://telegram.org/support
+    about: AyuGram cannot unban accounts; contact Telegram account support.
+  - name: AyuGram question or support
     url: https://t.me/ayugramchat
-    about: Ask a question.
+    about: Ask ordinary AyuGram questions in the AyuGram community chat.

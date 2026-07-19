@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "chat_helpers/message_field.h"
 
+#include "ayu/features/forward/ayu_forward.h"
 #include "history/history_widget.h"
 #include "history/history.h" // History::session
 #include "history/history_item.h" // HistoryItem::originalText
@@ -64,8 +65,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QTextBlock>
 #include <QtGui/QClipboard>
 #include <QtWidgets/QApplication>
-
-#include "ayu/features/forward/ayu_forward.h"
 
 namespace {
 
@@ -142,8 +141,22 @@ void EditLinkBox(
 		const QString &startLink,
 		Fn<void(TextWithTags, QString)> callback,
 		const style::InputField *fieldStyle,
-		Fn<QString(QString)> validate) {
+		Fn<QString(QString)> validate,
+		Fn<void(bool)> interactionActive,
+		Fn<void()> restoreFocus) {
 	Expects(callback != nullptr);
+
+	if (interactionActive) {
+		interactionActive(true);
+	}
+	box->boxClosing() | rpl::on_next([=] {
+		if (interactionActive) {
+			interactionActive(false);
+		}
+		if (restoreFocus) {
+			restoreFocus();
+		}
+	}, box->lifetime());
 
 	const auto &fieldSt = fieldStyle ? *fieldStyle : st::defaultInputField;
 	const auto content = box->verticalLayout();
@@ -405,7 +418,10 @@ Fn<bool(
 	EditLinkAction action)> DefaultEditLinkCallback(
 		std::shared_ptr<Main::SessionShow> show,
 		not_null<Ui::InputField*> field,
-		const style::InputField *fieldStyle) {
+		const style::InputField *fieldStyle,
+		Fn<QString(QString)> linkValidator,
+		Fn<void(bool)> interactionActive,
+		Fn<void()> restoreFocus) {
 	const auto weak = base::make_weak(field);
 	return [=](
 			EditLinkSelection selection,
@@ -415,7 +431,8 @@ Fn<bool(
 		if (action == EditLinkAction::Check) {
 			return (Ui::InputField::IsValidMarkdownLink(link)
 					&& !TextUtilities::IsMentionLink(link))
-				|| Ui::InputField::IsCustomDateLink(link);
+				|| Ui::InputField::IsCustomDateLink(link)
+				|| (linkValidator && !linkValidator(link).isEmpty());
 		}
 		if (Ui::InputField::IsCustomDateLink(link)) {
 			const auto dateStr = link.mid(
@@ -481,6 +498,9 @@ Fn<bool(
 				strong->commitMarkdownLinkEdit(selection, text, link);
 			}
 		};
+		const auto validateLink = linkValidator
+			? linkValidator
+			: Fn<QString(QString)>(qthelp::validate_url);
 		show->showBox(Box(
 			EditLinkBox,
 			show,
@@ -488,7 +508,9 @@ Fn<bool(
 			link,
 			std::move(callback),
 			fieldStyle,
-			qthelp::validate_url));
+			validateLink,
+			interactionActive,
+			restoreFocus));
 		return true;
 	};
 }
@@ -521,11 +543,18 @@ auto InitMessageFieldHandlers(MessageFieldHandlersArgs &&args)
 		Core::App().settings().replaceEmojiValue(),
 		Core::App().settings().systemTextReplaceValue());
 	field->setMarkdownReplacesEnabled(rpl::single(Ui::MarkdownEnabledState{
-		Ui::MarkdownEnabled{ std::move(args.allowMarkdownTags) }
+		Ui::MarkdownEnabled{
+			std::move(args.allowMarkdownTags),
+			args.allowTypedMarkdown
+		}
 	}));
 	if (const auto &show = args.show) {
 		field->setEditLinkCallback(
-			DefaultEditLinkCallback(show, field, args.fieldStyle));
+			DefaultEditLinkCallback(
+				show,
+				field,
+				args.fieldStyle,
+				args.linkValidator));
 		field->setEditLanguageCallback(DefaultEditLanguageCallback(show));
 		InitSpellchecker(show, field, args.fieldStyle != nullptr);
 	}
@@ -582,7 +611,9 @@ auto InitMessageFieldHandlers(MessageFieldHandlersArgs &&args)
 			link,
 			std::move(callback),
 			nullptr,
-			validate));
+			validate,
+			nullptr,
+			nullptr));
 		return true;
 	};
 }
@@ -690,11 +721,12 @@ void InitSpellchecker(
 			tr::lng_settings_manage_dictionaries(tr::now),
 			[=] { show->showBox(Box<Ui::ManageDictionariesBox>(session)); }
 		});
-	const auto s = Ui::CreateChild<SpellingHighlighter>(
+	// The highlighter parents itself to the field's document and registers a
+	// context-menu hook on the field, so it keeps working without holding it.
+	Ui::CreateChild<SpellingHighlighter>(
 		field.get(),
 		Core::App().settings().spellcheckerEnabledValue(),
 		menuItem);
-	field->setExtendedContextMenu(s->contextMenuCreated());
 #endif // TDESKTOP_DISABLE_SPELLCHECK
 }
 
@@ -905,10 +937,10 @@ AutocompleteQuery ParseMentionHashtagBotCommandQuery(
 				if (!features.autocompleteMentions) {
 					return {};
 				}
-				if ((position - fragmentPosition - i < 1 || text[i].isLetter()) && (i < 2 || !(text[i - 2].isLetterOrNumber() || text[i - 2] == '_'))) {
+				if ((position - fragmentPosition - i < 1 || text[i].isLetterOrNumber()) && (i < 2 || !(text[i - 2].isLetterOrNumber() || text[i - 2] == '_'))) {
 					result.fromStart = (i == 1) && (fragmentPosition == 0);
 					result.query = text.mid(i - 1, position - fragmentPosition - i + 1);
-				} else if ((position - fragmentPosition - i < 1 || text[i].isLetter()) && i > 2 && (text[i - 2].isLetterOrNumber() || text[i - 2] == '_') && !mentionInCommand) {
+				} else if ((position - fragmentPosition - i < 1 || text[i].isLetterOrNumber()) && i > 2 && (text[i - 2].isLetterOrNumber() || text[i - 2] == '_') && !mentionInCommand) {
 					mentionInCommand = true;
 					--i;
 					continue;
@@ -1352,12 +1384,11 @@ std::unique_ptr<Ui::AbstractButton> BoostsToLiftWriteRestriction(
 }
 
 std::unique_ptr<Ui::AbstractButton> AyuForwardWriteRestriction(
-	not_null<QWidget *> parent,
-	const PeerId &peer,
-	const Main::Session &session) {
+		not_null<QWidget*> parent,
+		PeerId peer,
+		const Main::Session &session) {
 	using namespace Ui;
 
-	// status and part
 	const auto pair = AyuForward::stateName(peer);
 
 	auto result = std::make_unique<FlatButton>(
@@ -1372,7 +1403,6 @@ std::unique_ptr<Ui::AbstractButton> AyuForwardWriteRestriction(
 		st::frozenRestrictionTitle);
 	title->setTextColorOverride(st::historyComposeButton.color->c);
 
-
 	title->setAttribute(Qt::WA_TransparentForMouseEvents);
 	title->show();
 	const auto subtitle = CreateChild<FlatLabel>(
@@ -1381,10 +1411,7 @@ std::unique_ptr<Ui::AbstractButton> AyuForwardWriteRestriction(
 		st::frozenRestrictionSubtitle);
 	subtitle->setAttribute(Qt::WA_TransparentForMouseEvents);
 	subtitle->show();
-
-
 	raw->sizeValue() | rpl::on_next([=](QSize size) {
-
 		const auto toggle = [&](auto &&widget, bool shown) {
 			if (widget->isHidden() == shown) {
 				widget->setVisible(shown);
@@ -1404,11 +1431,10 @@ std::unique_ptr<Ui::AbstractButton> AyuForwardWriteRestriction(
 		const auto top = (size.height() - height) / 2;
 		title->moveToLeft(skip, top, size.width());
 		subtitle->moveToLeft(skip, top + title->height(), size.width());
-
 	}, title->lifetime());
 
-	raw->setClickedCallback([&] {
-		AyuForward::cancelForward(peer, session);
+	raw->setClickedCallback([peer, session = &session] {
+		AyuForward::cancelForward(peer, *session);
 	});
 
 	return result;

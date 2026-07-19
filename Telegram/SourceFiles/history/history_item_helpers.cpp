@@ -9,38 +9,41 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_reactions_notify_settings.h"
 #include "api/api_text_entities.h"
+#include "apiwrap.h"
+#include "ayu/ayu_settings.h"
+#include "ayu/utils/telegram_helpers.h"
+#include "base/unixtime.h"
 #include "boxes/premium_preview_box.h"
 #include "calls/calls_instance.h"
+#include "core/application.h"
+#include "core/click_handler_types.h" // ClickHandlerContext.
+#include "data/components/ephemeral_messages.h"
 #include "data/components/sponsored_messages.h"
-#include "data/stickers/data_custom_emoji.h"
 #include "data/notify/data_notify_settings.h"
+#include "data/stickers/data_custom_emoji.h"
+#include "data/data_changes.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
-#include "data/data_changes.h"
 #include "data/data_document.h"
-#include "data/data_group_call.h"
 #include "data/data_forum.h"
 #include "data/data_forum_topic.h"
+#include "data/data_group_call.h"
 #include "data/data_message_reactions.h"
 #include "data/data_poll.h"
+#include "data/data_premium_limits.h"
 #include "data/data_session.h"
 #include "data/data_stories.h"
 #include "data/data_user.h"
 #include "history/view/controls/history_view_suggest_options.h"
 #include "history/history.h"
 #include "history/history_item_components.h"
+#include "lang/lang_keys.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "menu/menu_sponsored.h"
 #include "platform/platform_notifications_manager.h"
-#include "window/window_controller.h"
-#include "window/window_session_controller.h"
-#include "apiwrap.h"
-#include "base/unixtime.h"
-#include "core/application.h"
-#include "core/click_handler_types.h" // ClickHandlerContext.
 #include "settings/settings_credits_graphics.h"
 #include "storage/storage_account.h"
 #include "ui/boxes/confirm_box.h"
@@ -50,12 +53,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/toast/toast.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/item_text_options.h"
-#include "lang/lang_keys.h"
+#include "window/window_controller.h"
+#include "window/window_session_controller.h"
 
-// AyuGram includes
-#include "ayu/ayu_settings.h"
-#include "ayu/utils/telegram_helpers.h"
-
+#include "styles/style_layers.h"
 
 namespace {
 
@@ -76,7 +77,9 @@ int ComputeSendingMessagesCount(
 		not_null<History*> history,
 		const SendingErrorRequest &request) {
 	auto result = 0;
-	if (request.text && !request.text->empty()) {
+	if (request.richMessage) {
+		++result;
+	} else if (request.text && !request.text->empty()) {
 		auto sending = TextWithEntities();
 		auto left = TextWithEntities{
 			request.text->text,
@@ -85,9 +88,12 @@ int ComputeSendingMessagesCount(
 		auto prepareFlags = Ui::ItemTextOptions(
 			history,
 			history->session().user()).flags;
+		const auto messageLengthLimit = Data::PremiumLimits(
+			&history->session()
+		).messageLengthCurrent();
 		TextUtilities::PrepareForSending(left, prepareFlags);
 
-		while (TextUtilities::CutPart(sending, left, MaxMessageSize)) {
+		while (TextUtilities::CutPart(sending, left, messageLengthLimit)) {
 			++result;
 		}
 		if (!result) {
@@ -109,6 +115,9 @@ Data::SendError GetErrorForSending(
 	const auto thread = topic
 		? not_null<Data::Thread*>(topic)
 		: peer->owner().history(peer);
+	const auto messageLengthLimit = Data::PremiumLimits(
+		&thread->owningHistory()->session()
+	).messageLengthCurrent();
 	if (request.story) {
 		if (const auto error = request.story->errorTextForForward(thread)) {
 			return error;
@@ -121,8 +130,9 @@ Data::SendError GetErrorForSending(
 			}
 		}
 	}
-	const auto hasText = (request.text && !request.text->empty());
-	if (hasText) {
+	const auto hasText = request.richMessage
+		|| (request.text && !request.text->empty());
+	if (hasText && !request.ignoreRestrictions) {
 		const auto error = Data::RestrictionError(
 			peer,
 			ChatRestriction::SendOther);
@@ -132,7 +142,7 @@ Data::SendError GetErrorForSending(
 			return tr::lng_forward_cant(tr::now);
 		}
 	}
-	if (peer->slowmodeApplied()) {
+	if (peer->slowmodeApplied() && !request.ignoreRestrictions) {
 		const auto count = request.messagesCount
 			? request.messagesCount
 			: ComputeSendingMessagesCount(thread->owningHistory(), request);
@@ -143,7 +153,7 @@ Data::SendError GetErrorForSending(
 				return tr::lng_slowmode_no_many(tr::now);
 			}
 		}
-		if (request.text && request.text->text.size() > MaxMessageSize) {
+		if (request.text && request.text->text.size() > messageLengthLimit) {
 			return tr::lng_slowmode_too_long(tr::now);
 		} else if ((hasText || request.story) && count > 1) {
 			return tr::lng_slowmode_no_many(tr::now);
@@ -166,7 +176,7 @@ Data::SendError GetErrorForSending(
 		}
 	}
 	if (const auto left = peer->slowmodeSecondsLeft()) {
-		if (!request.ignoreSlowmodeCountdown) {
+		if (!request.ignoreSlowmodeCountdown && !request.ignoreRestrictions) {
 			return tr::lng_slowmode_enabled(
 				tr::now,
 				lt_left,
@@ -648,6 +658,60 @@ bool LookupReplyIsTopicPost(HistoryItem *replyTo) {
 		&& (replyTo->topicRootId() != Data::ForumTopic::kGeneralId);
 }
 
+bool ShowEphemeralReplyTextOnlyError(
+		std::shared_ptr<ChatHelpers::Show> show,
+		not_null<Main::Session*> session,
+		FullMsgId replyToId) {
+	const auto item = session->data().message(replyToId);
+	if (!item || !item->isEphemeral()) {
+		return false;
+	}
+	show->showToast(tr::lng_ephemeral_reply_text_only(tr::now));
+	return true;
+}
+
+void StripEphemeralReply(
+		not_null<Main::Session*> session,
+		FullReplyTo &replyTo) {
+	const auto item = session->data().message(replyTo.messageId);
+	if (item && item->isEphemeral()) {
+		replyTo.messageId = FullMsgId();
+	}
+}
+
+void ConfirmDeleteSelectedEphemeral(
+		std::shared_ptr<ChatHelpers::Show> show,
+		std::vector<not_null<HistoryItem*>> items,
+		Fn<void()> confirmed) {
+	if (items.empty()) {
+		return;
+	}
+	const auto session = &items.front()->history()->session();
+	auto ids = std::vector<FullMsgId>();
+	ids.reserve(items.size());
+	for (const auto &item : items) {
+		ids.push_back(item->fullId());
+	}
+	const auto count = int(ids.size());
+	show->show(Ui::MakeConfirmBox({
+		.text = tr::lng_selected_delete_sure(tr::now, lt_count, count),
+		.confirmed = [=](Fn<void()> &&close) {
+			close();
+			const auto owner = &session->data();
+			for (const auto &id : ids) {
+				if (const auto item = owner->message(id)) {
+					session->ephemeralMessages().deleteMessage(item);
+				}
+			}
+			if (const auto onstack = confirmed) {
+				onstack();
+			}
+		},
+		.confirmText = tr::lng_box_delete(),
+		.confirmStyle = &st::attentionBoxButton,
+	}));
+}
+
 TextWithEntities DropDisallowedCustomEmoji(
 		not_null<PeerData*> to,
 		TextWithEntities text) {
@@ -861,9 +925,6 @@ MessageFlags FlagsFromMTP(
 			? Flag::IsOrWasScheduled
 			: Flag())
 		| ((flags & MTP::f_views) ? Flag::HasViews : Flag())
-		// AyuGram: removed
-		// | ((flags & MTP::f_noforwards) ? Flag::NoForwards : Flag())
-		| (flags & MTP::f_noforwards ? Flag::AyuNoForwards : Flag())
 		| ((flags & MTP::f_invert_media) ? Flag::InvertMedia : Flag())
 		| ((flags & MTP::f_video_processing_pending)
 			? Flag::EstimatedDate
@@ -875,6 +936,9 @@ MessageFlags FlagsFromMTP(
 			: Flag())
 		| ((flags & MTP::f_summary_from_language)
 			? Flag::CanBeSummarized
+			: Flag())
+		| ((flags & MTP::f_guestchat_via_from)
+			? Flag::GuestChatViaFrom
 			: Flag());
 }
 

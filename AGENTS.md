@@ -6,6 +6,30 @@ Avoid building the project.
 
 If you're asked to create a Pull Request, then clearly state in PR description that it was AI generated.
 
+## Text File Format
+
+- On Windows, keep project text files with CRLF line endings.
+- Do not save source, header, build/config, style, or localization files as UTF-8 with BOM. Use UTF-8 without BOM.
+- When rewriting project text files for normalization, preserve file content otherwise and do not introduce a BOM.
+
+## Commits
+
+- Subject: one concise, plain-language line summarizing the change, ~50-60 characters, matching the style of recent `git log` subjects. This is usually the entire message.
+- Add a short plain-language body only when the subject can't carry it (what was done, not the technical how) — a line or two at most.
+- Never add a `Co-Authored-By:` line or any tool/assistant attribution trailer.
+- Never add `Autotask:`/attempt or other workflow markers — commits read like normal history.
+
+## Local Storage Serialization
+
+Both app-level (`Core::Settings`) and session-level (`Main::SessionSettings`) use sequential binary serialization via `QDataStream`. Key rules:
+
+- New fields must ALWAYS be appended at the **end** of the stream, never inserted in the middle
+- Reading new fields must be guarded with `!stream.atEnd()` and provide a meaningful default/fallback
+- Inserting in the middle breaks reading of data saved by older versions (the new read code consumes bytes that belong to subsequent fields)
+- For simple flags and values, prefer using the generic KV prefs facility (`writePref<Type>` / `readPref<Type>`) instead of adding to the binary stream -- this avoids serialization ordering issues entirely
+
+---
+
 # Development Guidelines
 
 ## Coding Style
@@ -48,6 +72,80 @@ auto nameProducer = GetNameProducer();
 QString currentTitle = tr::lng_settings_title(tr::now);
 rpl::producer<QString> nameProducer = GetNameProducer();
 ```
+
+**Use trailing return types only when the normal form is too long:**
+
+Prefer the normal return type form when the opening line fits comfortably, roughly around 77 characters or less:
+
+```cpp
+// GOOD:
+[[nodiscard]] TextWithEntities FlattenSummaryBlocks(
+	const std::vector<Block> &blocks);
+```
+
+Do not use one-line trailing return types, or put the trailing return type after `)` on the same line. If it fits on one line with trailing syntax, the normal form would be shorter and easier to read:
+
+```cpp
+// BAD:
+auto ComputeTitle() -> QString;
+
+// BAD:
+[[nodiscard]] auto FlattenSummaryBlocks(
+	const std::vector<Block> &blocks) -> TextWithEntities;
+```
+
+Use `auto` with a trailing return type only when the normal opening line
+`{attributes} {return-type} {class-name::}{function-name(}` would be too long, or would force the return type onto its own line. Put the arrow and return type on the next line so the return type remains easy to find:
+
+```cpp
+// BAD:
+not_null<HistoryView::Controls::ComposeAiButton*>
+HistoryView::Controls::SetupCaptionAiButton(SetupCaptionAiButtonArgs &&args);
+```
+
+```cpp
+// GOOD:
+auto HistoryView::Controls::SetupCaptionAiButton(
+		SetupCaptionAiButtonArgs &&args)
+-> not_null<HistoryView::Controls::ComposeAiButton*>;
+```
+
+This applies to both declarations and definitions.
+
+**Use `_q` for QString literals:**
+
+Prefer the project literal `u"..."_q` instead of the verbose `QStringLiteral("...")` macro when creating `QString` values:
+
+```cpp
+// Prefer this:
+auto text = u"Settings"_q;
+
+// Instead of this:
+auto text = QStringLiteral("Settings");
+```
+
+**Never use `Q_OS_LINUX` for platform checks in new code:**
+
+Telegram Desktop distinguishes at most three platforms: Windows / macOS / all-other. The "all-other" branch covers Linux, the BSD variants and more — and this is almost always the branch you want. `Q_OS_LINUX` narrows it to Linux alone, silently excluding the non-Linux Unix platforms, which is almost never intended. For the all-other branch use `!defined Q_OS_WIN && !defined Q_OS_MAC` at compile time, or its runtime equivalent `Platform::IsLinux()` — which, despite the name, means exactly `!defined Q_OS_WIN && !defined Q_OS_MAC` ("everything except Windows and macOS"), not Linux specifically:
+
+```cpp
+// BAD - excludes FreeBSD and other non-Linux Unix:
+#ifdef Q_OS_LINUX
+UnixSpecificCode();
+#endif // Q_OS_LINUX
+
+// GOOD - the all-other branch, compile time:
+#if !defined Q_OS_WIN && !defined Q_OS_MAC
+UnixSpecificCode();
+#endif // !Q_OS_WIN && !Q_OS_MAC
+
+// GOOD - the all-other branch, runtime (same meaning, NOT Linux-only):
+if (Platform::IsLinux()) {
+	UnixSpecificCode();
+}
+```
+
+`Q_OS_LINUX` is only for the rare case where you genuinely want exactly Linux and not the other Unix-like systems — usually you don't. The few existing uses (`Telegram/SourceFiles/core/sandbox.cpp`, `Telegram/SourceFiles/platform/linux/specific_linux.cpp`) are such genuinely Linux-only code paths and stay as-is.
 
 ## API Usage
 

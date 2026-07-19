@@ -23,6 +23,11 @@ namespace tr {
 struct now_t;
 } // namespace tr
 
+class DocumentData;
+class HistoryItem;
+class PeerData;
+class UserData;
+
 namespace Main {
 class Session;
 class SessionShow;
@@ -61,7 +66,10 @@ Fn<bool(
 	Ui::InputField::EditLinkAction action)> DefaultEditLinkCallback(
 		std::shared_ptr<Main::SessionShow> show,
 		not_null<Ui::InputField*> field,
-		const style::InputField *fieldStyle = nullptr);
+		const style::InputField *fieldStyle = nullptr,
+		Fn<QString(QString)> linkValidator = nullptr,
+		Fn<void(bool)> interactionActive = nullptr,
+		Fn<void()> restoreFocus = nullptr);
 Fn<void(QString now, Fn<void(QString)> save)> DefaultEditLanguageCallback(
 	std::shared_ptr<Ui::Show> show);
 
@@ -72,7 +80,9 @@ struct MessageFieldHandlersArgs {
 	Fn<bool()> customEmojiPaused;
 	Fn<bool(not_null<DocumentData*>)> allowPremiumEmoji;
 	const style::InputField *fieldStyle = nullptr;
+	Fn<QString(QString)> linkValidator;
 	base::flat_set<QString> allowMarkdownTags;
+	bool allowTypedMarkdown = true;
 };
 auto InitMessageFieldHandlers(MessageFieldHandlersArgs &&args)
 -> std::shared_ptr<Ui::ChatStyle>;
@@ -204,9 +214,9 @@ enum class FrozenWriteRestrictionType {
 	std::shared_ptr<ChatHelpers::Show> show,
 	FrozenWriteRestrictionType type,
 	FreezeInfoStyleOverride st = {});
-std::unique_ptr<Ui::AbstractButton> AyuForwardWriteRestriction(
-	not_null<QWidget *> parent,
-	const PeerId &peer,
+[[nodiscard]] std::unique_ptr<Ui::AbstractButton> AyuForwardWriteRestriction(
+	not_null<QWidget*> parent,
+	PeerId peer,
 	const Main::Session &session);
 void SelectTextInFieldWithMargins(
 	not_null<Ui::InputField*> field,
