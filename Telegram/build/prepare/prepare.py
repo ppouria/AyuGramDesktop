@@ -1080,6 +1080,7 @@ win:
     SET PATH=%THIRDPARTY_DIR%\\msys64\\usr\\bin;%PATH%
     SET CHERE_INVOKING=enabled_from_arguments
     SET MSYS2_PATH_TYPE=inherit
+    sed -i "s/ -gcv8//g" build/make/gen_msvs_vcxproj.sh
 
 win32:
     SET "TOOLCHAIN=x86-win32-vs17"
