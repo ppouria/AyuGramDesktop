@@ -4265,7 +4265,7 @@ void HistoryWidget::updateControlsVisibility() {
 				}
 			}
 			if (_ttlInfo) {
-				const auto was = !_ttlInfo->isHidden();
+				const auto was = _ttlInfo->isVisible();
 				const auto now = !_editMsgId
 					&& !hideExtra
 					&& settings.showAutoDeleteButtonInMessageField();
@@ -7434,7 +7434,7 @@ void HistoryWidget::updateFieldSize() {
 	if (_scheduled && !_scheduled->isHidden()) {
 		fieldWidth -= _scheduled->width();
 	}
-	if (_ttlInfo && !_ttlInfo->isHidden()) {
+	if (_ttlInfo && _ttlInfo->isVisible()) {
 		fieldWidth -= _ttlInfo->width();
 	}
 
