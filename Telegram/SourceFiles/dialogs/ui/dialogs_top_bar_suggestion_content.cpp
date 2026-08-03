@@ -34,12 +34,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/padding_wrap.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
-#include "styles/style_boxes.h"
-#include "styles/style_chat_helpers.h"
 #include "styles/style_chat.h"
 #include "styles/style_dialogs.h"
-#include "styles/style_layers.h"
-#include "styles/style_premium.h"
 #include "styles/style_settings.h"
 #include "styles/style_window.h"
 
@@ -797,6 +793,7 @@ void MountTopBarSuggestion(MountTopBarSuggestionArgs args) {
 	}
 	wrap->setParent(scroll);
 	wrap->raise();
+	wrap->setVisible(wrap->toggled() || wrap->animating());
 	const auto lastHeight = wrap->entity()->lifetime().make_state<int>(-1);
 	const auto syncHeight = [=] {
 		const auto h = wrap->height();

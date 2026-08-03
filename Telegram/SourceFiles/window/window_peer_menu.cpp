@@ -127,10 +127,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_credits.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
+#include "styles/style_share_box.h"
 #include "styles/style_window.h" // st::windowMinWidth
 #include "styles/style_menu_icons.h"
 #include "styles/style_premium.h"
-#include "styles/style_settings.h"
 
 #include <QAction>
 #include <QtWidgets/QApplication>
@@ -641,6 +641,7 @@ void Filler::addInfo() {
 	}
 	const auto controller = _controller;
 	const auto weak = base::make_weak(_thread);
+	const auto channel = infoPeer->asChannel();
 	const auto text = _thread->asTopic()
 		? (_thread->peer()->isBot()
 			? tr::lng_context_view_thread(tr::now)
@@ -649,6 +650,8 @@ void Filler::addInfo() {
 		? tr::lng_context_view_group(tr::now)
 		: infoPeer->isUser()
 		? tr::lng_context_view_profile(tr::now)
+		: (channel && channel->isCommunity())
+		? tr::lng_context_view_community(tr::now)
 		: tr::lng_context_view_channel(tr::now);
 	_addAction(text, [=] {
 		if (const auto strong = weak.get()) {

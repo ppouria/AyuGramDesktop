@@ -356,6 +356,7 @@ private:
 	void showSponsoredMenu(int peerSearchIndex, QPoint globalPos);
 
 	void clearMouseSelection(bool clearSelection = false);
+	void deselectAllRows();
 	void mousePressReleased(
 		QPoint globalPosition,
 		Qt::MouseButton button,
@@ -494,6 +495,7 @@ private:
 	[[nodiscard]] int communityRowCount() const;
 	[[nodiscard]] Row *communityRowAt(int index) const;
 	[[nodiscard]] int communityRowAbsoluteTop(int index) const;
+	[[nodiscard]] bool communityModeShown() const;
 
 	void paintCollapsedRows(
 		Painter &p,

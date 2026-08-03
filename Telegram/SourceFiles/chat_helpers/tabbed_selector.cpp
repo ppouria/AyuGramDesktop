@@ -40,7 +40,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwindow.h"
 #include "apiwrap.h"
 #include "styles/style_chat_helpers.h"
-#include "styles/style_menu_icons.h"
 
 namespace ChatHelpers {
 
@@ -1106,6 +1105,16 @@ void TabbedSelector::provideRecentEmoji(
 		if (tab.type() == SelectorTab::Emoji) {
 			const auto emoji = static_cast<EmojiListWidget*>(tab.widget());
 			emoji->provideRecent(customRecentList);
+		}
+	}
+}
+
+void TabbedSelector::setMarkedCustomIds(
+		const base::flat_set<DocumentId> &ids) {
+	for (const auto &tab : _tabs) {
+		if (tab.type() == SelectorTab::Emoji) {
+			const auto emoji = static_cast<EmojiListWidget*>(tab.widget());
+			emoji->setMarkedCustomIds(ids);
 		}
 	}
 }

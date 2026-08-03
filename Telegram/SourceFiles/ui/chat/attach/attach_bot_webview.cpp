@@ -2141,6 +2141,7 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 		Webview::WindowConfig{
 			.opaqueBg = params.bodyBg,
 			.storageId = _storageId,
+			.allowThirdPartyCookies = _externalShell,
 			.mode = _externalShell
 				? Webview::WindowMode::External
 				: Webview::WindowMode::Embedded,

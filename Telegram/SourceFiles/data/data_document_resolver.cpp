@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_document_resolver.h"
 
+#include "ayu/ui/boxes/plugin_info_box.h"
 #include "base/platform/base_platform_info.h"
 #include "boxes/abstract_box.h" // Ui::show().
 #include "chat_helpers/ttl_media_layer_widget.h"
@@ -35,13 +36,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 
 #include <QtCore/QBuffer>
+#include <QtCore/QFile>
 #include <QtCore/QMimeType>
 #include <QtCore/QMimeDatabase>
-
-// AyuGram includes
-#include "ayu/ui/boxes/plugin_info_box.h"
-#include <QtCore/QFile>
-
 
 namespace Data {
 namespace {
@@ -91,15 +88,12 @@ void LaunchWithWarning(
 
 	auto &app = Core::App();
 	auto &settings = app.settings();
-	const auto warn = [&] {
-		if (item && item->history()->peer->isVerified()) {
-			return false;
-		}
-		return (isIpReveal && settings.ipRevealWarning())
-			|| ((nameType == Core::NameType::Executable
-				|| nameType == Core::NameType::Unknown)
-				&& !settings.noWarningExtensions().contains(extension));
-	}();
+	const auto warn = LauncherWouldWarn(
+		settings,
+		nameType,
+		isIpReveal,
+		extension,
+		item);
 	if (extension.isEmpty()) {
 		// If you launch a file without extension, like "test", in case
 		// there is an executable file with the same name in this folder,
@@ -152,6 +146,58 @@ void LaunchWithWarning(
 }
 
 } // namespace
+
+ImageOpenCheck CheckImageOpenInApp(
+		not_null<DocumentData*> document,
+		const std::shared_ptr<DocumentMedia> &media) {
+	auto result = ImageOpenCheck();
+	if (document->size >= Images::kReadBytesLimit) {
+		result.sizeOverLimit = true;
+		return result;
+	}
+	const auto &location = document->location(true);
+	const auto mime = u"image/"_q;
+	if (!location.isEmpty() && location.accessEnable()) {
+		result.accessGuard.emplace(gsl::finally(Fn<void()>(
+			[location = Core::FileLocation(location)] {
+				location.accessDisable();
+			})));
+		const auto path = location.name();
+		result.source = ImageOpenSource::Location;
+		result.mime = Core::MimeTypeForFile(QFileInfo(path)).name();
+		if (result.mime.startsWith(mime)) {
+			result.readable = QImageReader(path).canRead();
+			result.openInApp = result.readable;
+		}
+		if (!result.openInApp) {
+			result.accessGuard.reset();
+		}
+	} else if (document->mimeString().startsWith(mime)
+		&& !media->bytes().isEmpty()) {
+		auto bytes = media->bytes();
+		auto buffer = QBuffer(&bytes);
+		result.source = ImageOpenSource::Bytes;
+		result.mime = document->mimeString();
+		result.readable = QImageReader(&buffer).canRead();
+		result.openInApp = result.readable;
+	}
+	return result;
+}
+
+bool LauncherWouldWarn(
+		const Core::Settings &settings,
+		Core::NameType nameType,
+		bool isIpReveal,
+		const QString &extension,
+		HistoryItem *item) {
+	if (item && item->history()->peer->isVerified()) {
+		return false;
+	}
+	return (isIpReveal && settings.ipRevealWarning())
+		|| ((nameType == Core::NameType::Executable
+			|| nameType == Core::NameType::Unknown)
+			&& !settings.noWarningExtensions().contains(extension));
+}
 
 base::binary_guard ReadBackgroundImageAsync(
 		not_null<Data::DocumentMedia*> media,
@@ -207,35 +253,7 @@ void ResolveDocument(
 	};
 
 	const auto media = document->createMediaView();
-	const auto openImageInApp = [&] {
-		if (document->size >= Images::kReadBytesLimit) {
-			return false;
-		}
-		const auto &location = document->location(true);
-		const auto mime = u"image/"_q;
-		if (!location.isEmpty() && location.accessEnable()) {
-			const auto guard = gsl::finally([&] {
-				location.accessDisable();
-			});
-			const auto path = location.name();
-			if (Core::MimeTypeForFile(QFileInfo(path)).name().startsWith(mime)
-				&& QImageReader(path).canRead()) {
-				showDocument();
-				return true;
-			}
-		} else if (document->mimeString().startsWith(mime)
-			&& !media->bytes().isEmpty()) {
-			auto bytes = media->bytes();
-			auto buffer = QBuffer(&bytes);
-			if (QImageReader(&buffer).canRead()) {
-				showDocument();
-				return true;
-			}
-		}
-		return false;
-	};
 	const auto openPluginInfo = [&] {
-		// image size limit is fine too ig (64MB)
 		if (document->size >= Images::kReadBytesLimit) {
 			return false;
 		}
@@ -248,10 +266,8 @@ void ResolveDocument(
 			auto file = QFile(path);
 			if (file.open(QIODevice::ReadOnly)) {
 				const auto data = file.readAll();
-				file.close();
 				auto metadata = Ui::ParsePluginMetadata(data);
-				if (!metadata.id.isEmpty()
-					&& !metadata.name.isEmpty()) {
+				if (!metadata.id.isEmpty() && !metadata.name.isEmpty()) {
 					Ui::ShowPluginInfoBox(
 						controller,
 						path,
@@ -270,7 +286,12 @@ void ResolveDocument(
 		if (document->isAudioFile()
 			|| document->isVoiceMessage()
 			|| document->isVideoMessage()) {
-			::Media::Player::instance()->playPause({ document, msgId });
+			::Media::Player::instance()->playPause(
+				{ document, msgId },
+				::Media::Player::PlaylistContext{
+					topicRootId,
+					monoforumPeerId,
+				});
 			if (controller
 				&& item
 				&& item->media()
@@ -282,28 +303,36 @@ void ResolveDocument(
 		}
 	} else {
 		document->saveFromDataSilent();
-		if (!openPluginInfo() && !openImageInApp()) {
-			const auto path = document->filepath(true);
-			if (!path.isEmpty()) {
-				auto context = QVariant();
-				if (item) {
-					auto clickHandlerContext = ClickHandlerContext();
-					clickHandlerContext.itemId = item->fullId();
-					if (controller) {
-						clickHandlerContext.sessionWindow = controller;
-						clickHandlerContext.show = controller->uiShow();
-					}
-					context = QVariant::fromValue(clickHandlerContext);
+		if (openPluginInfo()) {
+			return;
+		}
+		const auto image = CheckImageOpenInApp(
+			document,
+			media);
+		if (image.openInApp) {
+			showDocument();
+			return;
+		}
+		const auto path = document->filepath(true);
+		if (!path.isEmpty()) {
+			auto context = QVariant();
+			if (item) {
+				auto clickHandlerContext = ClickHandlerContext();
+				clickHandlerContext.itemId = item->fullId();
+				if (controller) {
+					clickHandlerContext.sessionWindow = controller;
+					clickHandlerContext.show = controller->uiShow();
 				}
-				if (!Core::App().iv().showMarkdown(path, context)) {
-					LaunchWithWarning(path, item);
-				}
-			} else if (document->status == FileReady
-				|| document->status == FileDownloadFailed) {
-				DocumentSaveClickHandler::Save(
-					item ? item->fullId() : Data::FileOrigin(),
-					document);
+				context = QVariant::fromValue(clickHandlerContext);
 			}
+			if (!Core::App().iv().showMarkdown(path, context)) {
+				LaunchWithWarning(path, item);
+			}
+		} else if (document->status == FileReady
+			|| document->status == FileDownloadFailed) {
+			DocumentSaveClickHandler::Save(
+				item ? item->fullId() : Data::FileOrigin(),
+				document);
 		}
 	}
 }

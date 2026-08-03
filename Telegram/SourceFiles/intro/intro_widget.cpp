@@ -481,6 +481,9 @@ void Widget::appendStep(Step *step) {
 			moveToStep(step, action, animate);
 		}
 	});
+	step->setStepBelowCallback([=]() -> Step* {
+		return (_stepHistory.size() > 1) ? getStep(1) : nullptr;
+	});
 	step->setShowResetCallback([=] {
 		showResetButton();
 	});
