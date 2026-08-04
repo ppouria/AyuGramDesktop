@@ -22,9 +22,9 @@ jobs:
     runs-on: windows-latest
     strategy:
       fail-fast: true
-      max-parallel: 8
+      max-parallel: 10
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     defaults:
       run:
         shell: cmd
@@ -150,6 +150,7 @@ jobs:
           qt6 ^
           -D TDESKTOP_API_TEST=ON ^
           -D CMAKE_CONFIGURATION_TYPES=Debug ^
+          -D CMAKE_LINKER_TYPE=LLD ^
           -D CMAKE_COMPILE_WARNING_AS_ERROR=ON ^
           -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF ^
@@ -158,12 +159,12 @@ jobs:
       - name: Verify shards.
         if: matrix.shard == 0
         shell: pwsh
-        run: .github/scripts/windows-shard.ps1 -Mode verify -BuildPath out -ShardCount 8
+        run: .github/scripts/windows-shard.ps1 -Mode verify -BuildPath out -ShardCount 10
         working-directory: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
 
       - name: Compile shard.
         shell: pwsh
-        run: .github/scripts/windows-shard.ps1 -Mode compile -BuildPath out -Shard ${{ matrix.shard }} -ShardCount 8
+        run: .github/scripts/windows-shard.ps1 -Mode compile -BuildPath out -Shard ${{ matrix.shard }} -ShardCount 10
         working-directory: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
 
       - uses: actions/upload-artifact@v7
@@ -181,8 +182,8 @@ jobs:
           for ($attempt = 0; $attempt -lt 120; ++$attempt) {
             $result = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/artifacts?per_page=100" | ConvertFrom-Json
             $count = @($result.artifacts | Where-Object name -like 'windows-shard-*').Count
-            Write-Host "Found $count of 8 shard artifacts."
-            if ($count -eq 8) { exit 0 }
+            Write-Host "Found $count of 10 shard artifacts."
+            if ($count -eq 10) { exit 0 }
             Start-Sleep -Seconds 10
           }
           throw 'Timed out waiting for shard artifacts.'

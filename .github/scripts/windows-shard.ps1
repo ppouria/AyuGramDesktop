@@ -6,7 +6,7 @@ param(
 	[string] $BuildPath,
 	[string] $Ninja = 'ninja',
 	[int] $Shard = 0,
-	[int] $ShardCount = 8,
+	[int] $ShardCount = 10,
 	[string] $ArtifactPath = 'shard-artifact'
 )
 
@@ -84,7 +84,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $archivePattern = '(?i)(^|[\\/\s"])(lib)\.exe([\s"]|$)'
-$applicationPattern = '(?i)(^|[\\/\s"])link\.exe([\s"]|$).*/out:"?Debug[\\/](AyuGram|Updater)\.exe"?'
+$applicationPattern = '(?i)(^|[\\/\s"])(?:lld-)?link\.exe([\s"]|$).*/out:"?Debug[\\/](AyuGram|Updater)\.exe"?'
 $outputPattern = '(?i)\s/out:"?([^"\s]+)"?'
 $responsePattern = '@([^\s]+\.rsp)'
 $linkCommands = @($commands | Where-Object {
