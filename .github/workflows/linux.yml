@@ -74,7 +74,6 @@ jobs:
 
       - name: First set up.
         run: |
-          echo "WEEK=$(date -u +%G%V)" >> $GITHUB_ENV
           docker pull $IMAGE_TAG
 
       - name: Restore Telegram Desktop cache.
@@ -83,7 +82,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/.tdesktop-cache
-          key: ${{ runner.OS }}-tdesktop-${{ matrix.defines || 'null' }}-${{ env.WEEK }}
+          key: ${{ runner.OS }}-tdesktop-${{ matrix.defines || 'null' }}-${{ github.run_id }}
           restore-keys: ${{ runner.OS }}-tdesktop-${{ matrix.defines || 'null' }}-
 
       - name: Telegram Desktop build.
