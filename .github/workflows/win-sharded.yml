@@ -2,6 +2,11 @@ name: Build Windows Sharded
 
 on:
   workflow_dispatch:
+  push:
+    branches: ['codex/telegram-sync-7.0.3']
+    paths:
+      - '.github/workflows/win-sharded.yml'
+      - '.github/scripts/windows-shard.ps1'
 
 permissions:
   contents: read
