@@ -73,7 +73,7 @@ if ($Mode -eq 'compile') {
 		}
 		$destination = Join-Path $artifact $target
 		New-Item -ItemType Directory -Path (Split-Path $destination) -Force | Out-Null
-		New-Item -ItemType HardLink -Path $destination -Target $source | Out-Null
+		Copy-Item -LiteralPath $source -Destination $destination
 	}
 	return
 }
