@@ -57,6 +57,7 @@ jobs:
           echo "SDK=$SDK" >> $GITHUB_ENV
 
           sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
+          sed -i 's|/DEBUG:FASTLINK|/DEBUG:NONE|' "$TBUILD/$REPO_NAME/cmake/options_win.cmake"
 
           find "$TBUILD/$REPO_NAME/Telegram/build/prepare" -type f -print0 | sort -z | xargs -0 sha256sum >> CACHE_KEY.txt
           echo "$SDK" >> CACHE_KEY.txt
