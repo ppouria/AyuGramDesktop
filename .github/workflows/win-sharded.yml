@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -21,12 +22,14 @@ jobs:
     runs-on: windows-latest
     strategy:
       fail-fast: true
-      max-parallel: 4
+      max-parallel: 6
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4, 5]
     defaults:
       run:
         shell: cmd
+    env:
+      GH_TOKEN: ${{ github.token }}
 
     steps:
       - name: Prepare directories.
@@ -154,132 +157,51 @@ jobs:
       - name: Verify shards.
         if: matrix.shard == 0
         shell: pwsh
-        run: .github/scripts/windows-shard.ps1 -Mode verify -BuildPath out -ShardCount 4
+        run: .github/scripts/windows-shard.ps1 -Mode verify -BuildPath out -ShardCount 6
         working-directory: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
 
       - name: Compile shard.
         shell: pwsh
-        run: .github/scripts/windows-shard.ps1 -Mode compile -BuildPath out -Shard ${{ matrix.shard }} -ShardCount 4
+        run: .github/scripts/windows-shard.ps1 -Mode compile -BuildPath out -Shard ${{ matrix.shard }} -ShardCount 6
         working-directory: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
 
       - uses: actions/upload-artifact@v7
         name: Upload shard.
         with:
           name: windows-shard-${{ matrix.shard }}
-          path: |
-            ${{ env.TBUILD }}/${{ env.REPO_NAME }}/out/**
-            !${{ env.TBUILD }}/${{ env.REPO_NAME }}/out/**/*.pch
-            !${{ env.TBUILD }}/${{ env.REPO_NAME }}/out/**/*.lib
-            !${{ env.TBUILD }}/${{ env.REPO_NAME }}/out/**/*.exe
-            !${{ env.TBUILD }}/${{ env.REPO_NAME }}/out/**/*.dll
-            !${{ env.TBUILD }}/${{ env.REPO_NAME }}/out/**/*.pdb
-            !${{ env.TBUILD }}/${{ env.REPO_NAME }}/out/**/*.ilk
-            !${{ env.TBUILD }}/${{ env.REPO_NAME }}/out/**/*.idb
-            !${{ env.TBUILD }}/${{ env.REPO_NAME }}/out/**/*.db
-            !${{ env.TBUILD }}/${{ env.REPO_NAME }}/out/Debug/**
-            !${{ env.TBUILD }}/${{ env.REPO_NAME }}/out/Release/**
-            !${{ env.TBUILD }}/${{ env.REPO_NAME }}/out/packages/**
+          path: ${{ env.TBUILD }}/${{ env.REPO_NAME }}/out/shard-artifact/**
           compression-level: 0
           retention-days: 1
 
-  link:
-    name: Windows link
-    needs: compile
-    runs-on: windows-latest
-    defaults:
-      run:
-        shell: cmd
-
-    steps:
-      - name: Prepare directories.
+      - name: Wait for shards.
+        if: matrix.shard == 0
+        shell: pwsh
         run: |
-          mkdir %userprofile%\TBuild\Libraries
-          mklink /d %GITHUB_WORKSPACE%\TBuild %userprofile%\TBuild
-          echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
-          echo LibrariesPath=%GITHUB_WORKSPACE%\TBuild\Libraries\win64>>%GITHUB_ENV%
-
-      - name: Get repository name.
-        shell: bash
-        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
-
-      - name: Clone.
-        uses: actions/checkout@v7
-        with:
-          submodules: recursive
-          path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
-
-      - name: First set up.
-        shell: bash
-        run: |
-          DOCPATH=$TBUILD/$REPO_NAME/docs/building-win-x64.md
-          SDK="$(grep "SDK version" $DOCPATH | sed -r 's/.*\*\*(.*)\*\* SDK version.*/\1/')"
-          echo "SDK=$SDK" >> $GITHUB_ENV
-
-          find "$TBUILD/$REPO_NAME/Telegram/build/prepare" -type f -print0 | sort -z | xargs -0 sha256sum >> CACHE_KEY.txt
-          echo "$SDK" >> CACHE_KEY.txt
-          echo "CACHE_KEY=$(sha256sum CACHE_KEY.txt | awk '{ print $1 }')" >> $GITHUB_ENV
-
-      - uses: Eden-CI/msvc-dev-cmd@master
-        name: Native Tools Command Prompt.
-        with:
-          arch: x64
-          sdk: ${{ env.SDK }}
-          toolset: '14.44'
-
-      - name: NuGet sources.
-        run: |
-          nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
-          nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
-
-      - name: ThirdParty cache.
-        uses: actions/cache/restore@v6
-        with:
-          path: ${{ env.TBUILD }}\ThirdParty
-          key: ${{ runner.OS }}-${{ runner.arch }}-third-party-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-${{ runner.arch }}-third-party-
-
-      - name: Libraries cache.
-        uses: actions/cache/restore@v6
-        with:
-          path: |
-            ${{ env.LibrariesPath }}\*
-            !${{ env.LibrariesPath }}\cache_keys
-            !${{ env.LibrariesPath }}\[qQ]t[_-]*
-            ${{ env.LibrariesPath }}\cache_keys\*
-            !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ runner.OS }}-x64-libs-v2-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-x64-libs-v2-
-
-      - name: Qt cache.
-        uses: actions/cache/restore@v6
-        with:
-          path: |
-            ${{ env.LibrariesPath }}\[qQ]t[_-]*
-            ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ runner.OS }}-x64-qt6-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-x64-qt6-
-
-      - name: Libraries.
-        run: |
-          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat skip-release silent qt6
-
-      - name: Free up some disk space.
-        shell: bash
-        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
+          for ($attempt = 0; $attempt -lt 120; ++$attempt) {
+            $result = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/artifacts?per_page=100" | ConvertFrom-Json
+            $count = @($result.artifacts | Where-Object name -like 'windows-shard-*').Count
+            Write-Host "Found $count of 6 shard artifacts."
+            if ($count -eq 6) { exit 0 }
+            Start-Sleep -Seconds 10
+          }
+          throw 'Timed out waiting for shard artifacts.'
 
       - uses: actions/download-artifact@v8
         name: Download shards.
+        if: matrix.shard == 0
         with:
           pattern: windows-shard-*
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}\out
           merge-multiple: true
 
       - name: Link applications.
+        if: matrix.shard == 0
         shell: pwsh
         run: .github/scripts/windows-shard.ps1 -Mode link -BuildPath out
         working-directory: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
 
       - name: Move artifact.
+        if: matrix.shard == 0
         run: |
           mkdir artifact
           move %TBUILD%\%REPO_NAME%\out\Debug\AyuGram.exe artifact/
@@ -287,6 +209,7 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         name: Upload artifact.
+        if: matrix.shard == 0
         with:
           name: AyuGram x64 qt6 Ninja Multi-Config
           path: artifact\
