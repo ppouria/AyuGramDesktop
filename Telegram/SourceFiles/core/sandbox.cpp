@@ -719,7 +719,7 @@ uint64 Sandbox::execExternal(const QString &cmd) {
 			return Platform::ActivationWindowId(window);
 		}
 	} else if (cmd == "quit") {
-		Quit();
+		QMetaObject::invokeMethod(this, [] { Quit(); }, Qt::QueuedConnection);
 	}
 	return 0;
 }
