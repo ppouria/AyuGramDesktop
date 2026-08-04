@@ -45,7 +45,7 @@ jobs:
     env:
       UPLOAD_ARTIFACT: "true"
       ONLY_CACHE: "false"
-      SCCACHE_GHA_ENABLED: "true"
+      CCACHE_SLOPPINESS: pch_defines,time_macros
 
     defaults:
       run:
@@ -108,7 +108,10 @@ jobs:
           toolset: ${{ case(matrix.arch == 'arm64', '', '14.44') }}
 
       - name: Compiler cache.
-        uses: mozilla-actions/sccache-action@v0.0.11
+        uses: hendrikmuhs/ccache-action@v1.2.23
+        with:
+          key: windows-${{ matrix.arch }}-${{ matrix.qt }}
+          max-size: 4G
 
       - name: NuGet sources.
         run: |
@@ -234,9 +237,8 @@ jobs:
           %TDESKTOP_BUILD_API% ^
           -D CMAKE_CONFIGURATION_TYPES=Debug ^
           -D CMAKE_COMPILE_WARNING_AS_ERROR=ON ^
-          -D CMAKE_C_COMPILER_LAUNCHER=sccache ^
-          -D CMAKE_CXX_COMPILER_LAUNCHER=sccache ^
-          -D CMAKE_DISABLE_PRECOMPILE_HEADERS=ON ^
+          -D CMAKE_C_COMPILER_LAUNCHER=ccache ^
+          -D CMAKE_CXX_COMPILER_LAUNCHER=ccache ^
           -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF ^
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF
