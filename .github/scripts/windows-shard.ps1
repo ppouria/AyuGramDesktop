@@ -90,8 +90,9 @@ $responsePattern = '@([^\s]+\.rsp)'
 $linkCommands = @($commands | Where-Object {
 	($_ -match $archivePattern) -or ($_ -match $applicationPattern)
 })
+$archives = @($linkCommands | Where-Object { $_ -match $archivePattern })
 $applications = @($linkCommands | Where-Object { $_ -match $applicationPattern })
-if ($linkCommands.Count -eq 0 -or $applications.Count -ne 2 -or @($linkCommands | Where-Object { $_ -notmatch $outputPattern }).Count) {
+if ($archives.Count -eq 0 -or $applications.Count -ne 2 -or @($linkCommands | Where-Object { $_ -notmatch $outputPattern }).Count) {
 	throw 'Could not isolate the archive and application link commands.'
 }
 
@@ -174,8 +175,17 @@ try {
 		$command -match $outputPattern | Out-Null
 		$output = Join-Path $build $Matches[1]
 		New-Item -ItemType Directory -Path (Split-Path $output) -Force | Out-Null
-		& $env:ComSpec /d /s /c $command
-		if ($LASTEXITCODE -ne 0) {
+	}
+	$commandGroups = @(, $archives; , $applications)
+	foreach ($group in $commandGroups) {
+		$group | ForEach-Object -Parallel {
+			Set-Location $using:build
+			& $env:ComSpec /d /s /c $_
+			if ($LASTEXITCODE -ne 0) {
+				throw 'A final archive or link command failed.'
+			}
+		} -ThrottleLimit 4
+		if (-not $?) {
 			throw 'A final archive or link command failed.'
 		}
 	}
