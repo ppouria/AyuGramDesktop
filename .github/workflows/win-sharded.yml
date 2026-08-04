@@ -22,9 +22,9 @@ jobs:
     runs-on: windows-latest
     strategy:
       fail-fast: true
-      max-parallel: 6
+      max-parallel: 8
       matrix:
-        shard: [0, 1, 2, 3, 4, 5]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
     defaults:
       run:
         shell: cmd
@@ -157,12 +157,12 @@ jobs:
       - name: Verify shards.
         if: matrix.shard == 0
         shell: pwsh
-        run: .github/scripts/windows-shard.ps1 -Mode verify -BuildPath out -ShardCount 6
+        run: .github/scripts/windows-shard.ps1 -Mode verify -BuildPath out -ShardCount 8
         working-directory: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
 
       - name: Compile shard.
         shell: pwsh
-        run: .github/scripts/windows-shard.ps1 -Mode compile -BuildPath out -Shard ${{ matrix.shard }} -ShardCount 6
+        run: .github/scripts/windows-shard.ps1 -Mode compile -BuildPath out -Shard ${{ matrix.shard }} -ShardCount 8
         working-directory: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
 
       - uses: actions/upload-artifact@v7
@@ -180,8 +180,8 @@ jobs:
           for ($attempt = 0; $attempt -lt 120; ++$attempt) {
             $result = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/artifacts?per_page=100" | ConvertFrom-Json
             $count = @($result.artifacts | Where-Object name -like 'windows-shard-*').Count
-            Write-Host "Found $count of 6 shard artifacts."
-            if ($count -eq 6) { exit 0 }
+            Write-Host "Found $count of 8 shard artifacts."
+            if ($count -eq 8) { exit 0 }
             Start-Sleep -Seconds 10
           }
           throw 'Timed out waiting for shard artifacts.'

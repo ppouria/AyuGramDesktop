@@ -6,7 +6,7 @@ param(
 	[string] $BuildPath,
 	[string] $Ninja = 'ninja',
 	[int] $Shard = 0,
-	[int] $ShardCount = 6,
+	[int] $ShardCount = 8,
 	[string] $ArtifactPath = 'shard-artifact'
 )
 
@@ -86,6 +86,7 @@ if ($LASTEXITCODE -ne 0) {
 $archivePattern = '(?i)(^|[\\/\s"])(lib)\.exe([\s"]|$)'
 $applicationPattern = '(?i)(^|[\\/\s"])link\.exe([\s"]|$).*/out:"?Debug[\\/](AyuGram|Updater)\.exe"?'
 $outputPattern = '(?i)\s/out:"?([^"\s]+)"?'
+$responsePattern = '@([^\s]+\.rsp)'
 $linkCommands = @($commands | Where-Object {
 	($_ -match $archivePattern) -or ($_ -match $applicationPattern)
 })
@@ -94,9 +95,77 @@ if ($linkCommands.Count -eq 0 -or $applications.Count -ne 2 -or @($linkCommands 
 	throw 'Could not isolate the archive and application link commands.'
 }
 
+$implementation = Get-Content (Join-Path $build 'CMakeFiles\impl-Debug.ninja')
+function Get-ResponseFile([string] $command) {
+	if ($command -notmatch $responsePattern) {
+		return
+	}
+	$response = $Matches[1]
+	$command -match $outputPattern | Out-Null
+	$target = $Matches[1]
+	$prefix = "build ${target}:"
+	$edge = -1
+	for ($index = 0; $index -lt $implementation.Count; ++$index) {
+		if ($implementation[$index].StartsWith($prefix)) {
+			$edge = $index
+			break
+		}
+	}
+	if ($edge -lt 0) {
+		throw "Could not find the Ninja edge for $target."
+	}
+	$inputText = $implementation[$edge].Substring($prefix.Length + 1)
+	$ruleEnd = $inputText.IndexOf(' ')
+	if ($ruleEnd -lt 0) {
+		throw "Could not parse the Ninja edge for $target."
+	}
+	$inputText = $inputText.Substring($ruleEnd + 1)
+	$inputEnd = $inputText.Length
+	foreach ($marker in @(' | ', ' || ')) {
+		$position = $inputText.IndexOf($marker)
+		if ($position -ge 0 -and $position -lt $inputEnd) {
+			$inputEnd = $position
+		}
+	}
+	$inputs = @($inputText.Substring(0, $inputEnd).Split(' ') | Where-Object { $_ })
+	$values = @{}
+	for ($index = $edge + 1; $index -lt $implementation.Count; ++$index) {
+		$line = $implementation[$index]
+		if (-not $line.StartsWith('  ')) {
+			break
+		}
+		if ($line -match '^  (LINK_PATH|LINK_LIBRARIES) = (.*)$') {
+			$values[$Matches[1]] = $Matches[2]
+		}
+	}
+	$content = @(
+		$inputs
+		$values['LINK_PATH']
+		$values['LINK_LIBRARIES']
+	) | Where-Object { $_ } | ForEach-Object {
+		$_.Replace('$:', ':').Replace('$ ', ' ').Replace('$$', '$')
+	}
+	if ($content.Count -eq 0) {
+		throw "Could not create the response file for $target."
+	}
+	[pscustomobject]@{
+		Path = Join-Path $build $response
+		Content = $content -join "`r`n"
+	}
+}
+
+$responseFiles = @($linkCommands | ForEach-Object { Get-ResponseFile $_ })
 if ($Mode -eq 'verify') {
-	Write-Host "Found $($linkCommands.Count) final archive and link commands."
+	Write-Host "Found $($linkCommands.Count) final commands and $($responseFiles.Count) response files."
 	return
+}
+
+foreach ($responseFile in $responseFiles) {
+	New-Item -ItemType Directory -Path (Split-Path $responseFile.Path) -Force | Out-Null
+	[System.IO.File]::WriteAllText(
+		$responseFile.Path,
+		$responseFile.Content,
+		[System.Text.UTF8Encoding]::new($false))
 }
 
 Push-Location $build
