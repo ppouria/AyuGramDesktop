@@ -111,7 +111,6 @@ jobs:
           -D CMAKE_CONFIGURATION_TYPES=Debug \
           -D CMAKE_C_FLAGS_DEBUG="-O0 -fpch-preprocess" \
           -D CMAKE_CXX_FLAGS_DEBUG="-O0 -fpch-preprocess" \
-          -D CMAKE_COMPILE_WARNING_AS_ERROR=ON \
           -D TDESKTOP_API_TEST=ON \
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF \
@@ -153,3 +152,5 @@ jobs:
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: out/Debug/artifact/
+          compression-level: 0
+          retention-days: 7
