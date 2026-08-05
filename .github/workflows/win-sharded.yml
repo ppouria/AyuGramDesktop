@@ -65,17 +65,16 @@ jobs:
         id: metadata
         shell: bash
         run: |
-          DOCPATH=$TBUILD/$REPO_NAME/docs/building-win-x64.md
-          SDK="$(grep "SDK version" $DOCPATH | sed -r 's/.*\*\*(.*)\*\* SDK version.*/\1/')"
-          find "$TBUILD/$REPO_NAME/Telegram/build/prepare" -type f -print0 | sort -z | xargs -0 sha256sum > CACHE_KEY.txt
-          echo "$SDK" >> CACHE_KEY.txt
-          CACHE_KEY="$(sha256sum CACHE_KEY.txt | awk '{ print $1 }')"
+          REPO_PATH="$(cygpath -u "$TBUILD")/$REPO_NAME"
+          SDK="$(grep "SDK version" "$REPO_PATH/docs/building-win-x64.md" | sed -r 's/.*\*\*(.*)\*\* SDK version.*/\1/')"
+          PREPARE_TREE="$(git -C "$REPO_PATH" rev-parse HEAD:Telegram/build/prepare)"
+          CACHE_KEY="$(printf '%s\n%s\n' "$PREPARE_TREE" "$SDK" | sha256sum | awk '{ print $1 }')"
           echo "SDK=$SDK" >> $GITHUB_ENV
           echo "CACHE_KEY=$CACHE_KEY" >> $GITHUB_ENV
           echo "sdk=$SDK" >> $GITHUB_OUTPUT
           echo "cache_key=$CACHE_KEY" >> $GITHUB_OUTPUT
           sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
-          sed -i 's|/DEBUG:FASTLINK|/DEBUG:NONE|' "$TBUILD/$REPO_NAME/cmake/options_win.cmake"
+          sed -i 's|/DEBUG:FASTLINK|/DEBUG:NONE|' "$REPO_PATH/cmake/options_win.cmake"
 
       - name: Find ThirdParty cache.
         id: lookup-third-party
@@ -115,7 +114,7 @@ jobs:
       - name: Clone dependency sources.
         if: env.NEEDS_LIBRARIES == 'true'
         shell: bash
-        run: git -C "$TBUILD/$REPO_NAME" submodule update --init --recursive
+        run: git -C "$(cygpath -u "$TBUILD")/$REPO_NAME" submodule update --init --recursive
 
       - uses: Eden-CI/msvc-dev-cmd@master
         if: env.NEEDS_LIBRARIES == 'true'
@@ -169,7 +168,7 @@ jobs:
       - name: Trim dependency caches.
         if: env.NEEDS_LIBRARIES == 'true'
         shell: bash
-        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
+        run: find "$(cygpath -u "$LibrariesPath")" '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
 
       - name: Save ThirdParty cache.
         if: env.NEEDS_LIBRARIES == 'true' && steps.lookup-third-party.outputs.cache-hit != 'true'
@@ -237,7 +236,7 @@ jobs:
         shell: bash
         run: |
           sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
-          sed -i 's|/DEBUG:FASTLINK|/DEBUG:NONE|' "$TBUILD/$REPO_NAME/cmake/options_win.cmake"
+          sed -i 's|/DEBUG:FASTLINK|/DEBUG:NONE|' "$(cygpath -u "$TBUILD")/$REPO_NAME/cmake/options_win.cmake"
 
       - uses: Eden-CI/msvc-dev-cmd@master
         name: Native Tools Command Prompt.
@@ -276,7 +275,7 @@ jobs:
 
       - name: Free up disk space.
         shell: bash
-        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
+        run: find "$(cygpath -u "$LibrariesPath")" '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
 
       - name: Configure.
         run: |
@@ -343,7 +342,7 @@ jobs:
         shell: bash
         run: |
           sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
-          sed -i 's|/DEBUG:FASTLINK|/DEBUG:NONE|' "$TBUILD/$REPO_NAME/cmake/options_win.cmake"
+          sed -i 's|/DEBUG:FASTLINK|/DEBUG:NONE|' "$(cygpath -u "$TBUILD")/$REPO_NAME/cmake/options_win.cmake"
 
       - uses: Eden-CI/msvc-dev-cmd@master
         name: Native Tools Command Prompt.
@@ -382,7 +381,7 @@ jobs:
 
       - name: Free up disk space.
         shell: bash
-        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
+        run: find "$(cygpath -u "$LibrariesPath")" '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
 
       - name: Configure.
         run: |
