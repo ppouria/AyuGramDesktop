@@ -218,9 +218,6 @@ jobs:
     env:
       CACHE_KEY: ${{ needs.dependencies.outputs.cache_key }}
       SDK: ${{ needs.dependencies.outputs.sdk }}
-      SCCACHE_GHA_ENABLED: 'true'
-      SCCACHE_GHA_CACHE_TO: windows-shard-${{ matrix.shard }}
-      SCCACHE_GHA_CACHE_FROM: windows-shard-${{ matrix.shard }}
 
     steps:
       - name: Prepare directories.
@@ -252,11 +249,6 @@ jobs:
           arch: x64
           sdk: ${{ env.SDK }}
           toolset: '14.44'
-
-      - name: Set up compiler cache.
-        uses: mozilla-actions/sccache-action@v0.0.11
-        with:
-          version: v0.17.0
 
       - name: Restore ThirdParty cache.
         uses: actions/cache/restore@v6
@@ -299,8 +291,6 @@ jobs:
           -D TDESKTOP_API_TEST=ON ^
           -D CMAKE_CONFIGURATION_TYPES=Debug ^
           -D CMAKE_LINKER_TYPE=LLD ^
-          -D CMAKE_C_COMPILER_LAUNCHER=sccache ^
-          -D CMAKE_CXX_COMPILER_LAUNCHER=sccache ^
           -D CMAKE_COMPILE_WARNING_AS_ERROR=ON ^
           -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF ^
