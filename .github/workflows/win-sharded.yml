@@ -34,19 +34,186 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  dependencies:
+    name: Prepare Windows dependencies
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: cmd
+    outputs:
+      cache_key: ${{ steps.metadata.outputs.cache_key }}
+      sdk: ${{ steps.metadata.outputs.sdk }}
+
+    steps:
+      - name: Prepare directories.
+        run: |
+          mkdir %userprofile%\TBuild\Libraries
+          mklink /d %GITHUB_WORKSPACE%\TBuild %userprofile%\TBuild
+          echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
+          echo LibrariesPath=%GITHUB_WORKSPACE%\TBuild\Libraries\win64>>%GITHUB_ENV%
+
+      - name: Get repository name.
+        shell: bash
+        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
+
+      - name: Clone dependency metadata.
+        uses: actions/checkout@v7
+        with:
+          path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
+
+      - name: Compute dependency key.
+        id: metadata
+        shell: bash
+        run: |
+          DOCPATH=$TBUILD/$REPO_NAME/docs/building-win-x64.md
+          SDK="$(grep "SDK version" $DOCPATH | sed -r 's/.*\*\*(.*)\*\* SDK version.*/\1/')"
+          find "$TBUILD/$REPO_NAME/Telegram/build/prepare" -type f -print0 | sort -z | xargs -0 sha256sum > CACHE_KEY.txt
+          echo "$SDK" >> CACHE_KEY.txt
+          CACHE_KEY="$(sha256sum CACHE_KEY.txt | awk '{ print $1 }')"
+          echo "SDK=$SDK" >> $GITHUB_ENV
+          echo "CACHE_KEY=$CACHE_KEY" >> $GITHUB_ENV
+          echo "sdk=$SDK" >> $GITHUB_OUTPUT
+          echo "cache_key=$CACHE_KEY" >> $GITHUB_OUTPUT
+          sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
+          sed -i 's|/DEBUG:FASTLINK|/DEBUG:NONE|' "$TBUILD/$REPO_NAME/cmake/options_win.cmake"
+
+      - name: Find ThirdParty cache.
+        id: lookup-third-party
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: ${{ runner.OS }}-${{ runner.arch }}-third-party-${{ env.CACHE_KEY }}
+          lookup-only: true
+
+      - name: Find libraries cache.
+        id: lookup-libs
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\*
+            !${{ env.LibrariesPath }}\cache_keys
+            !${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\*
+            !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-x64-libs-v2-${{ env.CACHE_KEY }}
+          lookup-only: true
+
+      - name: Find Qt cache.
+        id: lookup-qt
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-x64-qt6-${{ env.CACHE_KEY }}
+          lookup-only: true
+
+      - name: Check dependency caches.
+        shell: bash
+        run: echo "NEEDS_LIBRARIES=${{ steps.lookup-third-party.outputs.cache-hit != 'true' || steps.lookup-libs.outputs.cache-hit != 'true' || steps.lookup-qt.outputs.cache-hit != 'true' }}" >> $GITHUB_ENV
+
+      - name: Clone dependency sources.
+        if: env.NEEDS_LIBRARIES == 'true'
+        shell: bash
+        run: git -C "$TBUILD/$REPO_NAME" submodule update --init --recursive
+
+      - uses: Eden-CI/msvc-dev-cmd@master
+        if: env.NEEDS_LIBRARIES == 'true'
+        name: Native Tools Command Prompt.
+        with:
+          arch: x64
+          sdk: ${{ env.SDK }}
+          toolset: '14.44'
+
+      - name: NuGet sources.
+        if: env.NEEDS_LIBRARIES == 'true'
+        run: |
+          nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
+          nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
+
+      - name: Restore ThirdParty cache.
+        if: env.NEEDS_LIBRARIES == 'true'
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: ${{ runner.OS }}-${{ runner.arch }}-third-party-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-${{ runner.arch }}-third-party-
+
+      - name: Restore libraries cache.
+        if: env.NEEDS_LIBRARIES == 'true'
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\*
+            !${{ env.LibrariesPath }}\cache_keys
+            !${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\*
+            !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-x64-libs-v2-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-x64-libs-v2-
+
+      - name: Restore Qt cache.
+        if: env.NEEDS_LIBRARIES == 'true'
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-x64-qt6-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-x64-qt6-
+
+      - name: Build missing dependencies.
+        if: env.NEEDS_LIBRARIES == 'true'
+        run: '%TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat skip-release silent qt6'
+
+      - name: Trim dependency caches.
+        if: env.NEEDS_LIBRARIES == 'true'
+        shell: bash
+        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
+
+      - name: Save ThirdParty cache.
+        if: env.NEEDS_LIBRARIES == 'true' && steps.lookup-third-party.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: ${{ runner.OS }}-${{ runner.arch }}-third-party-${{ env.CACHE_KEY }}
+
+      - name: Save libraries cache.
+        if: env.NEEDS_LIBRARIES == 'true' && steps.lookup-libs.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\*
+            !${{ env.LibrariesPath }}\cache_keys
+            !${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\*
+            !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-x64-libs-v2-${{ env.CACHE_KEY }}
+
+      - name: Save Qt cache.
+        if: env.NEEDS_LIBRARIES == 'true' && steps.lookup-qt.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-x64-qt6-${{ env.CACHE_KEY }}
+
   compile:
     name: Windows shard ${{ matrix.shard }}
+    needs: dependencies
     runs-on: windows-latest
     strategy:
       fail-fast: true
-      max-parallel: 10
+      max-parallel: 16
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     defaults:
       run:
         shell: cmd
     env:
-      GH_TOKEN: ${{ github.token }}
+      CACHE_KEY: ${{ needs.dependencies.outputs.cache_key }}
+      SDK: ${{ needs.dependencies.outputs.sdk }}
 
     steps:
       - name: Prepare directories.
@@ -66,19 +233,11 @@ jobs:
           submodules: recursive
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
 
-      - name: First set up.
+      - name: Disable unused debug data.
         shell: bash
         run: |
-          DOCPATH=$TBUILD/$REPO_NAME/docs/building-win-x64.md
-          SDK="$(grep "SDK version" $DOCPATH | sed -r 's/.*\*\*(.*)\*\* SDK version.*/\1/')"
-          echo "SDK=$SDK" >> $GITHUB_ENV
-
           sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
           sed -i 's|/DEBUG:FASTLINK|/DEBUG:NONE|' "$TBUILD/$REPO_NAME/cmake/options_win.cmake"
-
-          find "$TBUILD/$REPO_NAME/Telegram/build/prepare" -type f -print0 | sort -z | xargs -0 sha256sum >> CACHE_KEY.txt
-          echo "$SDK" >> CACHE_KEY.txt
-          echo "CACHE_KEY=$(sha256sum CACHE_KEY.txt | awk '{ print $1 }')" >> $GITHUB_ENV
 
       - uses: Eden-CI/msvc-dev-cmd@master
         name: Native Tools Command Prompt.
@@ -87,21 +246,14 @@ jobs:
           sdk: ${{ env.SDK }}
           toolset: '14.44'
 
-      - name: NuGet sources.
-        run: |
-          nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
-          nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
-
-      - name: ThirdParty cache.
-        id: cache-third-party
+      - name: Restore ThirdParty cache.
         uses: actions/cache/restore@v6
         with:
           path: ${{ env.TBUILD }}\ThirdParty
           key: ${{ runner.OS }}-${{ runner.arch }}-third-party-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-${{ runner.arch }}-third-party-
+          fail-on-cache-miss: true
 
-      - name: Libraries cache.
-        id: cache-libs
+      - name: Restore libraries cache.
         uses: actions/cache/restore@v6
         with:
           path: |
@@ -111,36 +263,104 @@ jobs:
             ${{ env.LibrariesPath }}\cache_keys\*
             !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
           key: ${{ runner.OS }}-x64-libs-v2-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-x64-libs-v2-
+          fail-on-cache-miss: true
 
-      - name: Qt cache.
-        id: cache-qt
+      - name: Restore Qt cache.
         uses: actions/cache/restore@v6
         with:
           path: |
             ${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
           key: ${{ runner.OS }}-x64-qt6-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-x64-qt6-
+          fail-on-cache-miss: true
 
-      - name: Libraries.
-        run: |
-          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat skip-release silent qt6
-
-      - name: Free up some disk space.
+      - name: Free up disk space.
         shell: bash
         run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
 
-      - name: Save ThirdParty cache.
-        if: matrix.shard == 0 && steps.cache-third-party.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+      - name: Configure.
+        run: |
+          cd %TBUILD%\%REPO_NAME%\Telegram
+          call configure.bat ^
+          -G "Ninja Multi-Config" ^
+          qt6 ^
+          -D TDESKTOP_API_TEST=ON ^
+          -D CMAKE_CONFIGURATION_TYPES=Debug ^
+          -D CMAKE_LINKER_TYPE=LLD ^
+          -D CMAKE_COMPILE_WARNING_AS_ERROR=ON ^
+          -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
+          -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF ^
+          -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF
+
+      - name: Compile shard.
+        shell: pwsh
+        run: .github/scripts/windows-shard.ps1 -Mode compile -BuildPath out -Shard ${{ matrix.shard }} -ShardCount 16
+        working-directory: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
+
+      - uses: actions/upload-artifact@v7
+        name: Upload shard.
+        with:
+          name: windows-shard-${{ matrix.shard }}
+          path: ${{ env.TBUILD }}/${{ env.REPO_NAME }}/out/shard-artifact/**
+          compression-level: 1
+          retention-days: 1
+
+  link:
+    name: Windows streaming linker
+    needs: dependencies
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      actions: write
+    defaults:
+      run:
+        shell: cmd
+    env:
+      CACHE_KEY: ${{ needs.dependencies.outputs.cache_key }}
+      SDK: ${{ needs.dependencies.outputs.sdk }}
+      GH_TOKEN: ${{ github.token }}
+      SHARD_COUNT: 16
+
+    steps:
+      - name: Prepare directories.
+        run: |
+          mkdir %userprofile%\TBuild\Libraries
+          mklink /d %GITHUB_WORKSPACE%\TBuild %userprofile%\TBuild
+          echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
+          echo LibrariesPath=%GITHUB_WORKSPACE%\TBuild\Libraries\win64>>%GITHUB_ENV%
+
+      - name: Get repository name.
+        shell: bash
+        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
+
+      - name: Clone.
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
+
+      - name: Disable unused debug data.
+        shell: bash
+        run: |
+          sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
+          sed -i 's|/DEBUG:FASTLINK|/DEBUG:NONE|' "$TBUILD/$REPO_NAME/cmake/options_win.cmake"
+
+      - uses: Eden-CI/msvc-dev-cmd@master
+        name: Native Tools Command Prompt.
+        with:
+          arch: x64
+          sdk: ${{ env.SDK }}
+          toolset: '14.44'
+
+      - name: Restore ThirdParty cache.
+        uses: actions/cache/restore@v6
         with:
           path: ${{ env.TBUILD }}\ThirdParty
-          key: ${{ steps.cache-third-party.outputs.cache-primary-key }}
+          key: ${{ runner.OS }}-${{ runner.arch }}-third-party-${{ env.CACHE_KEY }}
+          fail-on-cache-miss: true
 
-      - name: Save libraries cache.
-        if: matrix.shard == 0 && steps.cache-libs.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+      - name: Restore libraries cache.
+        uses: actions/cache/restore@v6
         with:
           path: |
             ${{ env.LibrariesPath }}\*
@@ -148,16 +368,21 @@ jobs:
             !${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\*
             !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ steps.cache-libs.outputs.cache-primary-key }}
+          key: ${{ runner.OS }}-x64-libs-v2-${{ env.CACHE_KEY }}
+          fail-on-cache-miss: true
 
-      - name: Save Qt cache.
-        if: matrix.shard == 0 && steps.cache-qt.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+      - name: Restore Qt cache.
+        uses: actions/cache/restore@v6
         with:
           path: |
             ${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ steps.cache-qt.outputs.cache-primary-key }}
+          key: ${{ runner.OS }}-x64-qt6-${{ env.CACHE_KEY }}
+          fail-on-cache-miss: true
+
+      - name: Free up disk space.
+        shell: bash
+        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
 
       - name: Configure.
         run: |
@@ -174,53 +399,86 @@ jobs:
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF
 
       - name: Verify shards.
-        if: matrix.shard == 0
         shell: pwsh
-        run: .github/scripts/windows-shard.ps1 -Mode verify -BuildPath out -ShardCount 10
+        run: .github/scripts/windows-shard.ps1 -Mode verify -BuildPath out -ShardCount 16
         working-directory: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
 
-      - name: Compile shard.
-        shell: pwsh
-        run: .github/scripts/windows-shard.ps1 -Mode compile -BuildPath out -Shard ${{ matrix.shard }} -ShardCount 10
-        working-directory: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
-
-      - uses: actions/upload-artifact@v7
-        name: Upload shard.
-        with:
-          name: windows-shard-${{ matrix.shard }}
-          path: ${{ env.TBUILD }}/${{ env.REPO_NAME }}/out/shard-artifact/**
-          compression-level: 0
-          retention-days: 1
-
-      - name: Wait for shards.
-        if: matrix.shard == 0
+      - name: Download shards as they finish.
         shell: pwsh
         run: |
-          for ($attempt = 0; $attempt -lt 120; ++$attempt) {
-            $result = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/artifacts?per_page=100" | ConvertFrom-Json
-            $count = @($result.artifacts | Where-Object name -like 'windows-shard-*').Count
-            Write-Host "Found $count of 10 shard artifacts."
-            if ($count -eq 10) { exit 0 }
-            Start-Sleep -Seconds 10
+          $ErrorActionPreference = 'Stop'
+          $headers = @{
+            Accept = 'application/vnd.github+json'
+            Authorization = "Bearer $env:GH_TOKEN"
+            'X-GitHub-Api-Version' = '2022-11-28'
+            'User-Agent' = 'AyuGram-Windows-Linker'
           }
-          throw 'Timed out waiting for shard artifacts.'
+          $api = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          $output = Join-Path $env:TBUILD "$env:REPO_NAME\out"
+          $downloaded = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+          $expected = [int]$env:SHARD_COUNT
 
-      - uses: actions/download-artifact@v8
-        name: Download shards.
-        if: matrix.shard == 0
-        with:
-          pattern: windows-shard-*
-          path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}\out
-          merge-multiple: true
+          for ($attempt = 0; $attempt -lt 240 -and $downloaded.Count -lt $expected; ++$attempt) {
+            try {
+              $result = Invoke-RestMethod -Uri "$api/artifacts?per_page=100" -Headers $headers
+              foreach ($artifact in @($result.artifacts)) {
+                $name = [string]$artifact.name
+                if ($name -notmatch '^windows-shard-(\d+)$' -or $downloaded.Contains($name)) {
+                  continue
+                }
+                $index = [int]$Matches[1]
+                if ($index -lt 0 -or $index -ge $expected) {
+                  continue
+                }
+                $zip = Join-Path $env:RUNNER_TEMP "$name.zip"
+                try {
+                  Invoke-WebRequest -Uri $artifact.archive_download_url -Headers $headers -OutFile $zip
+                  Expand-Archive -LiteralPath $zip -DestinationPath $output -Force
+                  [void]$downloaded.Add($name)
+                  Remove-Item -LiteralPath $zip -Force
+                  Write-Host "Downloaded $name ($($downloaded.Count) of $expected)."
+                  try {
+                    Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/artifacts/$($artifact.id)" -Headers $headers
+                  } catch {
+                    Write-Warning "Could not delete temporary artifact $name."
+                  }
+                } catch {
+                  Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
+                  Write-Warning "Could not download $name yet: $_"
+                }
+              }
+
+              if (($attempt % 6) -eq 0) {
+                $jobs = Invoke-RestMethod -Uri "$api/jobs?per_page=100" -Headers $headers
+                $failed = @($jobs.jobs | Where-Object {
+                  $_.name -like 'Windows shard *' -and $_.conclusion -in @('failure', 'cancelled', 'timed_out')
+                })
+                if ($failed.Count) {
+                  throw "Shard job failed: $($failed[0].name)."
+                }
+              }
+            } catch {
+              if ($_.Exception.Message -like 'Shard job failed:*') {
+                throw
+              }
+              Write-Warning "Artifact polling failed: $_"
+            }
+
+            if ($downloaded.Count -lt $expected) {
+              Start-Sleep -Seconds 5
+            }
+          }
+
+          if ($downloaded.Count -ne $expected) {
+            throw "Timed out after downloading $($downloaded.Count) of $expected shard artifacts."
+          }
 
       - name: Link applications.
-        if: matrix.shard == 0
         shell: pwsh
         run: .github/scripts/windows-shard.ps1 -Mode link -BuildPath out
         working-directory: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
 
       - name: Move artifact.
-        if: matrix.shard == 0
         run: |
           mkdir artifact
           move %TBUILD%\%REPO_NAME%\out\Debug\AyuGram.exe artifact/
@@ -228,9 +486,8 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         name: Upload artifact.
-        if: matrix.shard == 0
         with:
           name: AyuGram x64 qt6 Ninja Multi-Config
           path: artifact\
           compression-level: 0
-          retention-days: 7
+          retention-days: 1
