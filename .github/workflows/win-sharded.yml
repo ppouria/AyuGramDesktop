@@ -73,8 +73,6 @@ jobs:
           echo "CACHE_KEY=$CACHE_KEY" >> $GITHUB_ENV
           echo "sdk=$SDK" >> $GITHUB_OUTPUT
           echo "cache_key=$CACHE_KEY" >> $GITHUB_OUTPUT
-          sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
-          sed -i 's|/DEBUG:FASTLINK|/DEBUG:NONE|' "$REPO_PATH/cmake/options_win.cmake"
 
       - name: Find ThirdParty cache.
         id: lookup-third-party
@@ -115,6 +113,13 @@ jobs:
         if: env.NEEDS_LIBRARIES == 'true'
         shell: bash
         run: git -C "$(cygpath -u "$TBUILD")/$REPO_NAME" submodule update --init --recursive
+
+      - name: Disable unused dependency debug data.
+        if: env.NEEDS_LIBRARIES == 'true'
+        shell: bash
+        run: |
+          sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
+          sed -i 's|/DEBUG:FASTLINK|/DEBUG:NONE|' "$(cygpath -u "$TBUILD")/$REPO_NAME/cmake/options_win.cmake"
 
       - uses: Eden-CI/msvc-dev-cmd@master
         if: env.NEEDS_LIBRARIES == 'true'
