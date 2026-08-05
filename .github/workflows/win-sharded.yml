@@ -219,6 +219,8 @@ jobs:
       CACHE_KEY: ${{ needs.dependencies.outputs.cache_key }}
       SDK: ${{ needs.dependencies.outputs.sdk }}
       SCCACHE_GHA_ENABLED: 'true'
+      SCCACHE_GHA_CACHE_TO: windows-shard-${{ matrix.shard }}
+      SCCACHE_GHA_CACHE_FROM: windows-shard-${{ matrix.shard }}
 
     steps:
       - name: Prepare directories.
