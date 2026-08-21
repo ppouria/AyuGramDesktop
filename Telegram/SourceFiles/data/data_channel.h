@@ -92,9 +92,6 @@ enum class ChannelDataFlag : uint64 {
 
 	AyuNoForwards = (1ULL << 63),
 };
-static_assert(ChannelDataFlag::AyuNoForwards != ChannelDataFlag::Community);
-static_assert(
-	ChannelDataFlag::AyuNoForwards != ChannelDataFlag::CommunityCollapsed);
 inline constexpr bool is_flag_type(ChannelDataFlag) { return true; };
 using ChannelDataFlags = base::flags<ChannelDataFlag>;
 

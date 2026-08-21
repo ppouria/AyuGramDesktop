@@ -243,16 +243,6 @@ void SetActionText(not_null<QAction*> action, rpl::producer<QString> &&text) {
 	}, *lifetime);
 }
 
-void MarkAsReadChatList(not_null<Dialogs::MainList*> list) {
-	auto mark = std::vector<not_null<History*>>();
-	for (const auto &row : list->indexed()->all()) {
-		if (const auto history = row->history()) {
-			mark.push_back(history);
-		}
-	}
-	ranges::for_each(mark, MarkAsReadThread);
-}
-
 void PeerMenuAddMuteSubmenuAction(
 		not_null<Window::SessionController*> controller,
 		not_null<Data::Thread*> thread,
@@ -830,17 +820,7 @@ void Filler::addUngroup() {
 	}
 	const auto controller = _controller;
 	_addAction(tr::lng_community_ungroup(tr::now), [=] {
-		controller->show(Ui::MakeConfirmBox({
-			.text = tr::lng_community_ungroup_text(),
-			.confirmed = [=](Fn<void()> close) {
-				channel->session().api().communities()
-					.toggleCollapsedInDialogs(channel, false);
-				close();
-			},
-			.confirmText = tr::lng_community_ungroup(),
-			.confirmStyle = &st::attentionBoxButton,
-			.title = tr::lng_community_ungroup_title(),
-		}));
+		PeerMenuUngroupCommunity(controller, channel);
 	}, &st::menuIconExpand);
 }
 
@@ -3148,18 +3128,19 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 			const auto forum = row->peer()->isForum();
 			const auto monoforum = row->peer()->isMonoforum();
 			const auto community = JoinedCommunityChats(row->peer());
-			const auto chooser = forum || monoforum || community;
-			if (showLockedError(row) || (count && chooser)) {
+			if (showLockedError(row)
+				|| (count && (forum || monoforum || community))) {
 				return;
-			} else if (chooser) {
-				ChooseRecipientBoxController::rowClicked(row);
-			} else if (count
-				|| base::IsCtrlPressed()
-				|| base::IsShiftPressed()) {
+			} else if (!count || forum || monoforum || community) {
+				if (base::IsCtrlPressed() || base::IsShiftPressed()) {
+					delegate()->peerListSetRowChecked(row, !row->checked());
+					_selectionChanges.fire({});
+				} else {
+					ChooseRecipientBoxController::rowClicked(row);
+				}
+			} else if (count) {
 				delegate()->peerListSetRowChecked(row, !row->checked());
 				_selectionChanges.fire({});
-			} else {
-				ChooseRecipientBoxController::rowClicked(row);
 			}
 		}
 
@@ -3437,11 +3418,12 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 			forwardOptions);
 		const auto items = history->owner().idsToItems(msgIds);
 		const auto ayuForwarding = AyuForward::isAyuForwardNeeded(items)
-			|| (!items.empty()
-				&& AyuForward::isFullAyuForwardNeeded(items.front()));
+			|| AyuForward::isFullAyuForwardNeeded(items.front());
+
 		if ((!state->submit || ayuForwarding) && successCallback) {
 			successCallback();
 		}
+		// AyuGram-changed
 	};
 
 	const auto sendMenuType = [=] {
@@ -3810,6 +3792,22 @@ base::weak_qptr<Ui::BoxContent> ShowSendNowMessagesBox(
 		.text = text,
 		.confirmed = std::move(done),
 		.confirmText = tr::lng_send_button(),
+	}));
+}
+
+void PeerMenuUngroupCommunity(
+		not_null<Window::SessionController*> controller,
+		not_null<ChannelData*> channel) {
+	controller->show(Ui::MakeConfirmBox({
+		.text = tr::lng_community_ungroup_text(),
+		.confirmed = [=](Fn<void()> close) {
+			channel->session().api().communities()
+				.toggleCollapsedInDialogs(channel, false);
+			close();
+		},
+		.confirmText = tr::lng_community_ungroup(),
+		.confirmStyle = &st::attentionBoxButton,
+		.title = tr::lng_community_ungroup_title(),
 	}));
 }
 
@@ -4375,6 +4373,16 @@ void MarkAsReadThread(not_null<Data::Thread*> thread) {
 	} else if (const auto sublist = thread->asSublist()) {
 		sublist->readTillEnd();
 	}
+}
+
+void MarkAsReadChatList(not_null<Dialogs::MainList*> list) {
+	auto mark = std::vector<not_null<History*>>();
+	for (const auto &row : list->indexed()->all()) {
+		if (const auto history = row->history()) {
+			mark.push_back(history);
+		}
+	}
+	ranges::for_each(mark, MarkAsReadThread);
 }
 
 void AddSeparatorAndShiftUp(const PeerMenuCallback &addAction) {

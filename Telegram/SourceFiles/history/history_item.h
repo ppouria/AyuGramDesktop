@@ -104,7 +104,6 @@ struct HistoryItemCommonFields {
 	bool ignoreForwardFrom = false;
 	bool ignoreForwardCaptions = false;
 	bool mediaSpoiler = false;
-	bool ayuNoForwards = false;
 };
 
 enum class HistoryReactionSource : char {
@@ -827,7 +826,6 @@ private:
 
 	bool _deleted = false;
 	bool _deletedAnimated = false;
-	bool _ayuNoForwards = false;
 	int _unsupportedTTL = 0;
 
 	TimeId _date = 0;

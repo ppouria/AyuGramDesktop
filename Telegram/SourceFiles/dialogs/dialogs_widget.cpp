@@ -109,8 +109,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 // AyuGram includes
 #include "ayu/ayu_settings.h"
-#include "ayu/utils/taptic_engine/taptic_engine.h"
 #include "ayu/utils/telegram_helpers.h"
+#include "base/platform/base_platform_haptic.h"
 
 
 namespace Dialogs {
@@ -1649,8 +1649,12 @@ void Widget::setupDownloadBar() {
 						return;
 					}
 				}
-				if (first) {
+				if (first && first->isHistoryEntry()) {
 					controller()->showMessage(first);
+				} else if (first) {
+					controller()->showSection(
+						Info::Downloads::Make(
+							controller()->session().user()));
 				}
 			}, _downloadBar->lifetime());
 
@@ -1851,7 +1855,7 @@ void Widget::setupStories() {
 			storiesToggleExplicitExpand(true);
 			_scroll->setOverscrollDefaults(0, 0);
 		} else {
-			TapticEngine::generateLevelChange();
+			base::Platform::Haptic();
 			_scroll->setOverscrollDefaults(
 				-st::dialogsStoriesFull.height,
 				0);
@@ -4104,6 +4108,14 @@ bool Widget::applySearchState(SearchState state) {
 		}
 		hideChildList();
 	}
+	if (state.inChat || _searchState.inChat != state.inChat) {
+		if (!_idSearchResults.empty() || !_idSearchQuery.isEmpty()) {
+			_idSearchResults.clear();
+			_idSearchQuery.clear();
+			_inner->idSearchReceived({});
+		}
+	}
+
 	if (state.inChat
 		&& _layout == Layout::Main
 		&& state.inChat.folder() != _openedFolder) {
@@ -4172,12 +4184,6 @@ bool Widget::applySearchState(SearchState state) {
 
 	const auto inChatChanged = (_searchState.inChat != state.inChat);
 	const auto communityChanged = (_searchState.community != state.community);
-	if (inChatChanged
-		&& (!_idSearchResults.empty() || !_idSearchQuery.isEmpty())) {
-		_idSearchResults.clear();
-		_idSearchQuery.clear();
-		_inner->idSearchReceived({});
-	}
 	const auto fromPeerChanged = (_searchState.fromPeer != state.fromPeer);
 	const auto tagsChanged = (_searchState.tags != state.tags);
 	const auto queryChanged = (_searchState.query != state.query);
@@ -4206,9 +4212,10 @@ bool Widget::applySearchState(SearchState state) {
 			return false;
 		}
 	} else if ((folder && folder == _openedFolder)
-		|| (community
+		|| (peer
 			&& _openedCommunity
-			&& community == _openedCommunity->channel())) {
+			&& (!community
+				|| community == _openedCommunity->channel()))) {
 		showSearchInTopBar(anim::type::normal);
 	} else if (peer && (_layout != Layout::Main)) {
 		return false;

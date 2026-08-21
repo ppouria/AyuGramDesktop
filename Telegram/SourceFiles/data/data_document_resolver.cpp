@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_document_resolver.h"
 
-#include "ayu/ui/boxes/plugin_info_box.h"
 #include "base/platform/base_platform_info.h"
 #include "boxes/abstract_box.h" // Ui::show().
 #include "chat_helpers/ttl_media_layer_widget.h"
@@ -36,9 +35,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 
 #include <QtCore/QBuffer>
-#include <QtCore/QFile>
 #include <QtCore/QMimeType>
 #include <QtCore/QMimeDatabase>
+
+// AyuGram includes
+#include "ayu/ui/boxes/plugin_info_box.h"
+#include <QtCore/QFile>
+
 
 namespace Data {
 namespace {
@@ -266,8 +269,10 @@ void ResolveDocument(
 			auto file = QFile(path);
 			if (file.open(QIODevice::ReadOnly)) {
 				const auto data = file.readAll();
+				file.close();
 				auto metadata = Ui::ParsePluginMetadata(data);
-				if (!metadata.id.isEmpty() && !metadata.name.isEmpty()) {
+				if (!metadata.id.isEmpty()
+					&& !metadata.name.isEmpty()) {
 					Ui::ShowPluginInfoBox(
 						controller,
 						path,

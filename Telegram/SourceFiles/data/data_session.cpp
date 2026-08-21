@@ -1286,6 +1286,12 @@ not_null<PeerData*> Session::processChat(const MTPChat &data) {
 	} else if (!result->isLoaded()) {
 		result->setLoadedStatus(PeerData::LoadedStatus::Normal);
 	}
+	if (!_pinnedCommunitiesNotLoaded.empty()) {
+		if (const auto channel = result->asChannel()
+			; channel && channel->isCommunity()) {
+			checkPinnedCommunityLoaded(channel);
+		}
+	}
 	if (flags) {
 		session().changes().peerUpdated(result, flags);
 	}
@@ -2711,14 +2717,25 @@ void Session::applyDialog(
 	const auto channelId = ChannelId(data.vcommunity_id().v);
 	const auto channel = channelLoaded(channelId);
 	if (!channel || !channel->isCommunity()) {
+		if (data.is_pinned()) {
+			_pinnedCommunitiesNotLoaded.emplace(channelId);
+		}
 		return;
 	}
+	_pinnedCommunitiesNotLoaded.remove(channelId);
 	const auto history = this->history(channel);
 	notifySettings().apply(
 		peerFromChannel(channelId),
 		data.vnotify_settings());
 	channel->ensuredCommunityInfo()->ensureRowInChatList();
 	setPinnedFromEntryList(history, data.is_pinned());
+}
+
+void Session::checkPinnedCommunityLoaded(not_null<ChannelData*> channel) {
+	if (!_pinnedCommunitiesNotLoaded.remove(peerToChannel(channel->id))) {
+		return;
+	}
+	session().api().reloadPinnedDialogs();
 }
 
 bool Session::pinnedCanPin(not_null<Dialogs::Entry*> entry) const {
@@ -2848,6 +2865,9 @@ const std::vector<Dialogs::Key> &Session::pinnedChatsOrder(
 }
 
 void Session::clearPinnedChats(Data::Folder *folder) {
+	if (!folder) {
+		_pinnedCommunitiesNotLoaded.clear();
+	}
 	chatsList(folder)->pinned()->clear();
 }
 
@@ -2906,9 +2926,11 @@ void Session::updateEditedMessage(const MTPMessage &data) {
 	}
 	edit = HistoryMessageEdition(_session, data.c_message());
 	if (settings.saveMessagesHistory() && !existing->isLocal() && !existing->author()->isSelf() && !edit.isEditHide) {
-		const auto msg = existing->originalText();
-
-		if (edit.textWithEntities == msg || msg.empty()) {
+		const auto &msg = existing->originalText();
+		const auto unchanged = edit.richPage
+			? (Iv::FlattenRichPageSummary(edit.richPage) == msg)
+			: (edit.textWithEntities == msg);
+		if (unchanged || msg.empty()) {
 			goto proceed;
 		}
 
@@ -3065,15 +3087,13 @@ void Session::checkTTLs() {
 		}
 		expired.insert(expired.end(), items.begin(), items.end());
 	}
-	auto toSave = std::vector<not_null<HistoryItem*>>();
 	auto toDestroy = std::vector<not_null<HistoryItem*>>();
 	for (const auto &item : expired) {
-		auto &target = isMessageSavable(item) ? toSave : toDestroy;
-		target.push_back(item);
-	}
-	for (const auto &item : toSave) {
-		item->applyTTL(0);
-		processMessageDelete(item);
+		if (isMessageSavable(item)) {
+			processMessageDelete(item);
+		} else {
+			toDestroy.push_back(item);
+		}
 	}
 	if (!toDestroy.empty()) {
 		notifyItemsAboutToBeDestroyed(toDestroy);
@@ -3136,22 +3156,22 @@ void Session::processMessagesDeleted(
 		return;
 	}
 
-	auto toSave = std::vector<not_null<HistoryItem*>>();
 	auto toDestroy = std::vector<not_null<HistoryItem*>>();
 	auto historiesToCheck = base::flat_set<not_null<History*>>();
 	for (const auto &messageId : data) {
 		const auto i = list ? list->find(messageId.v) : Messages::iterator();
 		if (list && i != list->end()) {
 			const auto item = i->second;
-			auto &target = isMessageSavable(item) ? toSave : toDestroy;
-			target.push_back(item);
-			historiesToCheck.emplace(item->history());
+			const auto history = item->history();
+			if (isMessageSavable(item)) {
+				processMessageDelete(item);
+			} else {
+				toDestroy.push_back(item);
+			}
+			historiesToCheck.emplace(history);
 		} else if (affected) {
 			affected->unknownMessageDeleted(messageId.v);
 		}
-	}
-	for (const auto &item : toSave) {
-		processMessageDelete(item);
 	}
 	if (!toDestroy.empty()) {
 		notifyItemsAboutToBeDestroyed(toDestroy);
@@ -3167,18 +3187,18 @@ void Session::processMessagesDeleted(
 }
 
 void Session::processNonChannelMessagesDeleted(const QVector<MTPint> &data) {
-	auto toSave = std::vector<not_null<HistoryItem*>>();
 	auto toDestroy = std::vector<not_null<HistoryItem*>>();
 	auto historiesToCheck = base::flat_set<not_null<History*>>();
 	for (const auto &messageId : data) {
 		if (const auto item = nonChannelMessage(messageId.v)) {
-			auto &target = isMessageSavable(item) ? toSave : toDestroy;
-			target.push_back(item);
-			historiesToCheck.emplace(item->history());
+			const auto history = item->history();
+			if (isMessageSavable(item)) {
+				processMessageDelete(item);
+			} else {
+				toDestroy.push_back(item);
+			}
+			historiesToCheck.emplace(history);
 		}
-	}
-	for (const auto &item : toSave) {
-		processMessageDelete(item);
 	}
 	if (!toDestroy.empty()) {
 		notifyItemsAboutToBeDestroyed(toDestroy);

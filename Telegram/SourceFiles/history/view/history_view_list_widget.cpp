@@ -2985,12 +2985,8 @@ TextForMimeData ListWidget::getSelectedText() const {
 	}
 
 	const auto richContext = (selected.size() > 1);
-	struct CopyEntry {
-		not_null<HistoryItem*> item;
-		const Data::Group *group = nullptr;
-	};
 	auto groups = base::flat_set<not_null<const Data::Group*>>();
-	auto entries = std::vector<CopyEntry>();
+	auto entries = std::vector<HistorySelectedTextEntry>();
 	entries.reserve(selected.size());
 
 	const auto addItem = [&](not_null<HistoryItem*> item) {
@@ -3019,34 +3015,14 @@ TextForMimeData ListWidget::getSelectedText() const {
 			}
 		}
 	}
-	ranges::sort(entries, [&](const CopyEntry &a, const CopyEntry &b) {
-		return _delegate->listIsLessInOrder(a.item, b.item);
-	});
-
-	auto result = TextForMimeData();
-	auto sep = u"\n"_q;
-	for (auto i = begin(entries), e = end(entries); i != e;) {
-		auto body = TextForMimeData();
-		if (i->group) {
-			const auto group = not_null<const Data::Group*>{ i->group };
-			body = richContext
-				? HistoryGroupTextForSelectedCopy(group)
-				: HistoryGroupText(group);
-		} else {
-			body = richContext
-				? HistoryItemTextForSelectedCopy(i->item)
-				: HistoryItemText(i->item);
-		}
-		auto part = HistorySelectedItemWrappedText(
-			i->item,
-			std::move(body),
-			richContext);
-		result.append(std::move(part));
-		if (++i != e) {
-			result.append(sep);
-		}
-	}
-	return result;
+	ranges::sort(
+		entries,
+		[&](
+			const HistorySelectedTextEntry &a,
+			const HistorySelectedTextEntry &b) {
+			return _delegate->listIsLessInOrder(a.item, b.item);
+		});
+	return HistorySelectedItemsText(entries, richContext);
 }
 
 MessageIdsList ListWidget::getSelectedIds() const {
@@ -3397,7 +3373,7 @@ void ListWidget::toggleFavoriteReaction(not_null<Element*> view) const {
 		return;
 	} else if (!ranges::contains(item->chosenReactions(), favorite)) {
 		if (const auto top = itemTop(view); top >= 0) {
-			view->animateReaction({ .id = favorite });
+			view->animateReaction({ .id = favorite, .haptic = true });
 		}
 	}
 	item->toggleReaction(favorite, HistoryReactionSource::Quick);
@@ -3585,8 +3561,7 @@ void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 
 	using namespace HistoryView::Reactions;
 	const auto desiredPosition = e->globalPos();
-	const auto reactItem = (_overElement
-		&& _overState.pointState != PointState::Outside)
+	const auto reactItem = _overElement
 		? _overElement->data().get()
 		: nullptr;
 	const auto attached = reactItem
@@ -3640,6 +3615,7 @@ void ListWidget::reactionChosen(ChosenReaction reaction) {
 				.id = reaction.id,
 				.flyIcon = reaction.icon,
 				.flyFrom = geometry.translated(0, -top),
+				.haptic = true,
 			});
 		}
 	}

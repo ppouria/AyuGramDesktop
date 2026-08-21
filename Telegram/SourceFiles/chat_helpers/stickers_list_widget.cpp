@@ -63,7 +63,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 // AyuGram includes
 #include "ayu/ayu_settings.h"
 #include "styles/style_ayu_styles.h"
-#include "boxes/abstract_box.h"
 
 
 namespace ChatHelpers {
@@ -299,7 +298,11 @@ StickersListWidget::StickersListWidget(
 			? Data::StickersType::Masks
 			: Data::StickersType::Stickers
 		) | rpl::on_next([=] {
-			refreshRecent();
+			if (underMouse()) {
+				_refreshDelayed = true;
+			} else {
+				refreshRecent();
+			}
 		}, lifetime());
 	}
 
@@ -1760,8 +1763,8 @@ void StickersListWidget::paintStickers(Painter &p, QRect clip) {
 
 				widthForTitle -= remove.width();
 			}
-			const auto amCreator
-				= (set.flags & Data::StickersSetFlag::AmCreator);
+			const auto amCreator = _features.openStickerSets
+				&& (set.flags & Data::StickersSetFlag::AmCreator);
 			if (amCreator) {
 				widthForTitle -= badgeWidth
 					+ st::stickersFeaturedUnreadSkip
@@ -2478,7 +2481,7 @@ StickersListWidget::createSearchShortcutRipple(int index) {
 		searchShortcutRect(index).size(),
 		st::roundRadiusLarge);
 	return std::make_unique<Ui::RippleAnimation>(
-		st::defaultRippleAnimation,
+		st().searchPackRipple,
 		std::move(mask),
 		[this, setId] {
 			const auto i = ranges::find(_searchShortcutSets, setId, &Set::id);
@@ -2669,7 +2672,8 @@ base::unique_qptr<Ui::PopupMenu> StickersListWidget::fillSetContextMenu(
 		_localSetsManager.get(),
 		crl::guard(this, [this](uint64 id) { removeSet(id); }),
 		crl::guard(this, [this] { update(); }),
-		st().menu);
+		st().menu,
+		st().icons);
 }
 
 base::unique_qptr<Ui::PopupMenu> FillStickerSetContextMenu(
@@ -2679,7 +2683,8 @@ base::unique_qptr<Ui::PopupMenu> FillStickerSetContextMenu(
 		not_null<LocalStickersManager*> localSetsManager,
 		Fn<void(uint64 setId)> remove,
 		Fn<void()> repaint,
-		const style::PopupMenu &menuSt) {
+		const style::PopupMenu &menuSt,
+		const style::ComposeIcons &icons) {
 	if (set->shortName.isEmpty()
 		|| (set->id == Data::Stickers::MegagroupSetId)
 		|| (set->id == Data::Stickers::CollectibleSetId)) {
@@ -2724,12 +2729,12 @@ base::unique_qptr<Ui::PopupMenu> FillStickerSetContextMenu(
 					repaint();
 				}
 			},
-			&st::menuIconAdd);
+			&icons.menuSetAdd);
 	}
 	menu->addAction(
 		tr::lng_chat_link_share(tr::now),
 		[=] { FastShareLink(show, url); },
-		&st::menuIconShare);
+		&icons.menuSetShare);
 	menu->addAction(
 		tr::lng_context_copy_link(tr::now),
 		[=] {
@@ -2742,13 +2747,13 @@ base::unique_qptr<Ui::PopupMenu> FillStickerSetContextMenu(
 				.iconLottieSize = st::toastLottieIconSize,
 			});
 		},
-		&st::menuIconLink);
+		&icons.menuSetCopyLink);
 	if (installed) {
 		menu->addSeparator();
 		menu->addAction(
 			tr::lng_stickers_remove_pack_confirm(tr::now),
 			[=] { remove(setId); },
-			&st::menuIconDelete);
+			&icons.menuSetRemove);
 	}
 	return menu;
 }
@@ -2989,10 +2994,16 @@ void StickersListWidget::resizeEvent(QResizeEvent *e) {
 
 void StickersListWidget::leaveEventHook(QEvent *e) {
 	clearSelection();
+	if (base::take(_refreshDelayed)) {
+		refreshRecent();
+	}
 }
 
 void StickersListWidget::leaveToChildEvent(QEvent *e, QWidget *child) {
 	clearSelection();
+	if (base::take(_refreshDelayed)) {
+		refreshRecent();
+	}
 }
 
 void StickersListWidget::enterFromChildEvent(QEvent *e, QWidget *child) {
@@ -3270,6 +3281,7 @@ bool StickersListWidget::appendSet(
 }
 
 void StickersListWidget::refreshRecent() {
+	_refreshDelayed = false;
 	if (_section == Section::Stickers) {
 		refreshRecentStickers();
 	}
@@ -3317,10 +3329,9 @@ auto StickersListWidget::collectRecentStickers() -> std::vector<Sticker> {
 	result.reserve(cloudCount + recent.size() + customCount);
 	_custom.reserve(cloudCount + recent.size() + customCount);
 
-    const auto &settings = AyuSettings::getInstance();
-
 	auto add = [&](not_null<DocumentData*> document, bool custom) {
-		if (result.size() >= settings.recentStickersCount()) {
+		if (result.size() >= kRecentDisplayLimit
+			&& !AyuSettings::getInstance().unlimitedRecentStickers()) {
 			return;
 		}
 		const auto i = ranges::find(result, document, &Sticker::document);
@@ -3355,6 +3366,7 @@ auto StickersListWidget::collectRecentStickers() -> std::vector<Sticker> {
 }
 
 void StickersListWidget::refreshRecentStickers(bool performResize) {
+	_refreshDelayed = false;
 	clearSelection();
 
 	auto recentPack = collectRecentStickers();

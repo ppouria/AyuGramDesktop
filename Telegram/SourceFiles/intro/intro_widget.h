@@ -94,7 +94,6 @@ class Step;
 } // namespace details
 
 enum class EnterPoint : uchar {
-	Start,
 	Phone,
 	Qr,
 };

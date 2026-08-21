@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/profile/info_profile_shared_media_classic.h"
 
-#include "ayu/ayu_settings.h"
 #include "core/ui_integration.h"
 #include "data/components/recent_shared_media_gifts.h"
 #include "data/data_channel.h"
@@ -34,6 +33,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_session_controller.h"
 #include "styles/style_info.h"
+
+// AyuGram includes
+#include "ayu/ayu_settings.h"
+
 
 namespace Info::Profile {
 namespace {

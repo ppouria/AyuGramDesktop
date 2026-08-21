@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "chat_helpers/message_field.h"
 
-#include "ayu/features/forward/ayu_forward.h"
 #include "history/history_widget.h"
 #include "history/history.h" // History::session
 #include "history/history_item.h" // HistoryItem::originalText
@@ -66,6 +65,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QTextBlock>
 #include <QtGui/QClipboard>
 #include <QtWidgets/QApplication>
+
+// AyuGram includes
+#include "ayu/features/forward/ayu_forward.h"
+
 
 namespace {
 
@@ -277,21 +280,22 @@ void EditLinkBox(
 		}
 	};
 
+	using TabbedRequest = Ui::InputField::TabbedRequest;
 	url->tabbed(
-	) | rpl::on_next([=](not_null<bool*> handled) {
+	) | rpl::on_next([=](not_null<TabbedRequest*> request) {
 		clearFullSelection(url);
 		text->setFocus();
-		*handled = true;
+		request->handled = true;
 	}, url->lifetime());
 
 	text->tabbed(
-	) | rpl::on_next([=](not_null<bool*> handled) {
+	) | rpl::on_next([=](not_null<TabbedRequest*> request) {
 		if (!url->empty()) {
 			url->selectAll();
 		}
 		clearFullSelection(text);
 		url->setFocus();
-		*handled = true;
+		request->handled = true;
 	}, text->lifetime());
 }
 
@@ -1385,11 +1389,12 @@ std::unique_ptr<Ui::AbstractButton> BoostsToLiftWriteRestriction(
 }
 
 std::unique_ptr<Ui::AbstractButton> AyuForwardWriteRestriction(
-		not_null<QWidget*> parent,
-		PeerId peer,
-		const Main::Session &session) {
+	not_null<QWidget *> parent,
+	const PeerId &peer,
+	const Main::Session &session) {
 	using namespace Ui;
 
+	// status and part
 	const auto pair = AyuForward::stateName(peer);
 
 	auto result = std::make_unique<FlatButton>(
@@ -1404,6 +1409,7 @@ std::unique_ptr<Ui::AbstractButton> AyuForwardWriteRestriction(
 		st::frozenRestrictionTitle);
 	title->setTextColorOverride(st::historyComposeButton.color->c);
 
+
 	title->setAttribute(Qt::WA_TransparentForMouseEvents);
 	title->show();
 	const auto subtitle = CreateChild<FlatLabel>(
@@ -1412,7 +1418,10 @@ std::unique_ptr<Ui::AbstractButton> AyuForwardWriteRestriction(
 		st::frozenRestrictionSubtitle);
 	subtitle->setAttribute(Qt::WA_TransparentForMouseEvents);
 	subtitle->show();
+
+
 	raw->sizeValue() | rpl::on_next([=](QSize size) {
+
 		const auto toggle = [&](auto &&widget, bool shown) {
 			if (widget->isHidden() == shown) {
 				widget->setVisible(shown);
@@ -1432,10 +1441,11 @@ std::unique_ptr<Ui::AbstractButton> AyuForwardWriteRestriction(
 		const auto top = (size.height() - height) / 2;
 		title->moveToLeft(skip, top, size.width());
 		subtitle->moveToLeft(skip, top + title->height(), size.width());
+
 	}, title->lifetime());
 
-	raw->setClickedCallback([peer, session = &session] {
-		AyuForward::cancelForward(peer, *session);
+	raw->setClickedCallback([&] {
+		AyuForward::cancelForward(peer, session);
 	});
 
 	return result;

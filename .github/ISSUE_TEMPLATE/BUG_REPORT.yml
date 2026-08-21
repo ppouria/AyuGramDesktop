@@ -1,14 +1,13 @@
-name: 🐞 Bug report
+name: Bug report
 description: Report errors or unexpected behavior.
 labels: [bug]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting an AyuGram Desktop issue!
+        Thanks for reporting issues of AyuGram Desktop!
 
-        Please provide the details below so the issue can be reproduced. For usage
-        questions and support, use https://t.me/ayugramchat instead of opening an issue.
+        To make it easier for us to help you please enter detailed information below.
   - type: textarea
     attributes:
       label: Steps to reproduce
@@ -33,17 +32,16 @@ body:
   - type: input
     attributes:
       label: Operating system
-      description: |
-        Write exact OS (e.g. Windows 11, macOS 14, Ubuntu 24.04 GNOME).
-        * 🛑 NO KERNEL VERSIONS (uname)
+      description: >
+        Your operating system name, version and desktop environment.
+        **Don't use kernel version (uname), it's useless.**
     validations:
       required: true
   - type: input
     attributes:
       label: Version of AyuGram Desktop
-      description: |
-        Write the exact version number shown in AyuGram Desktop.
-        Do not write "latest".
+      description: >
+        **Don't use 'latest'**, specify actual version.
     validations:
       required: true
   - type: dropdown
@@ -51,29 +49,24 @@ body:
       label: Installation source
       multiple: false
       options:
-        - Official GitHub release / @AyuGramReleases
-        - Winget or Scoop
-        - Homebrew
-        - Arch Linux AUR (ayugram-desktop / ayugram-desktop-git)
-        - Arch Linux AUR (ayugram-desktop-bin)
-        - Nix or NixOS
-        - Other Linux package
-        - Flatpak by 0FL01 (unofficial)
-        - Self-built
+        - Binary from GitHub / @AyuGramReleases channel
+        - Arch Linux (ayugram-desktop / ayugram-desktop-git)
+        - Arch Linux (ayugram-desktop-bin)
+        - flatpak by 0FL01
         - Other (unofficial) source
     validations:
       required: true
   - type: input
     attributes:
       label: Crash ID
-      description: |
-        If AyuGram Desktop crashed, copy the Crash ID shown by the crash reporter
-        on the next launch.
+      description: >
+        If you're reporting a crash, please enter the crash ID from the crash reporter
+        opening on the next launch after crash.
   - type: textarea
     attributes:
       label: Logs
       description: >
-        Type `viewlogs` directly into the settings menu to open the logs folder.
-        See the [cheat-code documentation](https://github.com/telegramdesktop/tdesktop/wiki/Cheat-Codes).
-      placeholder: Insert log.txt here if relevant
+        You can find log.txt using the `viewlogs`
+        [cheat code](https://github.com/telegramdesktop/tdesktop/wiki/Cheat-Codes).
+      placeholder: Insert log.txt here (if necessary)
       render: shell

@@ -7,9 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/settings_experimental.h"
 
-#include "ayu/ui/settings/settings_main.h"
 #include "settings/settings_common.h"
-#include "settings/settings_builder.h"
 #include "data/components/passkeys.h"
 #include "ui/layers/generic_box.h"
 #include "main/main_session.h"
@@ -67,6 +65,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QJsonDocument>
 #include <QtGui/QGuiApplication>
+
+// AyuGram includes
+#include "ayu/ui/settings/settings_main.h"
+#include "settings/settings_builder.h"
+
 
 namespace Settings {
 namespace {
@@ -128,7 +131,13 @@ struct ResolvedReferrer {
 		if (!entry.section) {
 			continue;
 		}
-		if (entry.id == controlId || entry.altIds.contains(controlId)) {
+		if (entry.id == controlId) {
+			return {
+				.controlId = entry.id,
+				.section = entry.section,
+			};
+		}
+		if (entry.altIds.contains(controlId)) {
 			return {
 				.controlId = entry.id,
 				.section = entry.section,
@@ -149,9 +158,11 @@ struct ResolvedReferrer {
 	} else if (id == u"use-small-msg-bubble-radius"_q) {
 		return u"ayu/messageBubbleRadius"_q;
 	} else if (id == u"unlimited-recent-stickers"_q) {
-		return u"ayu/recentStickersCount"_q;
+		return u"ayu/unlimitedRecentStickers"_q;
 	} else if (id == u"hide-ai-button"_q) {
 		return u"ayu/showAiEditorButtonInMessageField"_q;
+	} else if (id == u"unlimited-message-width"_q) {
+		return u"ayu/wideMultiplier"_q;
 	}
 	return QString();
 }
@@ -270,9 +281,9 @@ QString AddOption(
 		inner,
 		name,
 		description,
-		(option.relevant() || !referrer.isEmpty()
+		(!referrer.isEmpty() || option.relevant())
 			? st::settingsButtonNoIcon
-			: st::settingsOptionDisabled));
+			: st::settingsOptionDisabled);
 	if (!referrer.isEmpty()) {
 		button->addClickHandler([=] {
 			const auto resolved = ResolveReferrer(
@@ -284,20 +295,30 @@ QString AddOption(
 		});
 	} else {
 		button->toggleOn(toggles->events_starting_with(option.value()));
+	}
 
-		const auto restarter = (option.relevant() && option.restartRequired())
-			? button->lifetime().make_state<base::Timer>()
-			: nullptr;
-		if (restarter) {
-			restarter->setCallback([=] {
-				window->show(Ui::MakeConfirmBox({
-					.text = tr::lng_settings_need_restart(),
-					.confirmed = [] { Core::Restart(); },
-					.confirmText = tr::lng_settings_restart_now(),
-					.cancelText = tr::lng_settings_restart_later(),
-				}));
-			});
-		}
+	if (registerHighlight) {
+		registerHighlight(u"experimental/"_q + option.id(), button);
+	}
+
+	SetupCopyDeepLink(window, button, option.id());
+
+	const auto restarter = (referrer.isEmpty()
+		&& option.relevant()
+		&& option.restartRequired())
+		? button->lifetime().make_state<base::Timer>()
+		: nullptr;
+	if (restarter) {
+		restarter->setCallback([=] {
+			window->show(Ui::MakeConfirmBox({
+				.text = tr::lng_settings_need_restart(),
+				.confirmed = [] { Core::Restart(); },
+				.confirmText = tr::lng_settings_restart_now(),
+				.cancelText = tr::lng_settings_restart_later(),
+			}));
+		});
+	}
+	if (referrer.isEmpty()) {
 		button->toggledChanges(
 		) | rpl::on_next([=, &option](bool toggled) {
 			if (!option.relevant() && toggled != option.defaultValue()) {
@@ -312,12 +333,6 @@ QString AddOption(
 			}
 		}, inner->lifetime());
 	}
-
-	if (registerHighlight) {
-		registerHighlight(u"experimental/"_q + option.id(), button);
-	}
-
-	SetupCopyDeepLink(window, button, option.id());
 
 	const auto searchable = name + ' ' + description;
 	std::move(
@@ -503,6 +518,7 @@ void SetupExperimental(
 				Core::kOptionFractionalScalingEnabled,
 				Core::kOptionHighDpiDownscale,
 				Ui::GL::kOptionUseQtRhi,
+				Ui::GL::kOptionEnableVulkanRhi,
 				Core::kOptionFreeType,
 				Ui::kOptionQScroller,
 				Window::kOptionDisableTouchbar,

@@ -39,6 +39,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rp_widget.h"
 #include "ui/ui_utility.h"
 #include "ui/userpic_view.h"
+#include "window/window_peer_menu.h"
 #include "window/window_session_controller.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
@@ -124,7 +125,7 @@ constexpr auto kBounceDuration = crl::time(400);
 		if (!topic || topic == current) {
 			continue;
 		}
-		if (topic->chatListUnreadState().messages > 0) {
+		if (Window::IsUnreadThread(topic)) {
 			return topic;
 		}
 	}
@@ -544,10 +545,11 @@ void PullToNextChannel::Indicator::paintEvent(QPaintEvent *e) {
 			const auto count = next
 				? next->unreadCount()
 				: topic->chatListUnreadState().messages;
-			const auto badgeShown = (count > 0) && (release > 0.);
+			const auto badgeShown = (release > 0.)
+				&& (next ? (count > 0) : Window::IsUnreadThread(topic));
 			const auto font = st::historyPullNextBadgeFont;
 			const auto badgeHeight = float64(st::historyPullNextBadge);
-			const auto string = badgeShown
+			const auto string = (count > 0)
 				? ((count > 999) ? u"999+"_q : QString::number(count))
 				: QString();
 			const auto badgeWidth = badgeShown
@@ -959,7 +961,7 @@ void PullToNextChannel::handleOverscroll(
 				&& (_nextTopic.get() == next)
 				&& (next != current)
 				&& (next->forum() == current->forum())
-				&& (next->chatListUnreadState().messages > 0)
+				&& Window::IsUnreadThread(next)
 				&& active()) {
 				_pulling = false;
 				_jumping = true;
@@ -1022,10 +1024,12 @@ void PullToNextChannel::pushIndicator() {
 	_effective = effective;
 	_scroll->setContentBottomInset(std::max(0, int(base::SafeRound(
 		_jumping ? effective : (effective - _pull)))));
+	const auto hintVisible = (_parent->height()
+		> _scroll->y() + _scroll->height()) && (_pull > 0.);
 	if (_mode == Mode::History) {
 		const auto next = _next.get();
 		_indicator->setHistoryData(effective, _reached, next);
-		_hint->setData(_pull > 0., _reached, _mode, next != nullptr);
+		_hint->setData(hintVisible, _reached, _mode, next != nullptr);
 	} else if (_mode == Mode::Topic) {
 		const auto next = _nextTopic.get();
 		_indicator->setTopicData(
@@ -1033,7 +1037,7 @@ void PullToNextChannel::pushIndicator() {
 			_reached,
 			next,
 			_topicCompleted);
-		_hint->setData(_pull > 0., _reached, _mode, next != nullptr);
+		_hint->setData(hintVisible, _reached, _mode, next != nullptr);
 	}
 }
 
@@ -1051,6 +1055,8 @@ void PullToNextChannel::updateGeometry() {
 	if (bottom > top) {
 		_hint->setGeometry(_scroll->x(), top, _scroll->width(), bottom - top);
 		_hint->raise();
+	} else {
+		_hint->hideNow();
 	}
 }
 
@@ -1094,7 +1100,7 @@ void PullToNextChannel::jumpToTopic(
 		|| (_nextTopic.get() != next)
 		|| (next == current)
 		|| (next->forum() != current->forum())
-		|| (next->chatListUnreadState().messages <= 0)
+		|| !Window::IsUnreadThread(next)
 		|| !active()) {
 		reset();
 		return;

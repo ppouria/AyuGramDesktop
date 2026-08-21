@@ -586,12 +586,12 @@ bool CloudList::applyChangesFrom(std::vector<Data::CloudTheme> &&list) {
 	if (insertTillLimit(list, limit)) {
 		changed = true;
 	}
+	_group->setValue(groupValueForId(appliedElementId()));
+
 	if (AyuFeatures::MessageShot::isChoosingTheme()) {
-		const auto selected
-			= AyuFeatures::MessageShot::getSelectedFromCustom();
-		_group->setValue(selected ? groupValueForId(selected->id) : -1);
-	} else {
-		_group->setValue(groupValueForId(appliedElementId()));
+		if (const auto selected = AyuFeatures::MessageShot::getSelectedFromCustom()) {
+			_group->setValue(groupValueForId(selected.value().id));
+		}
 	}
 	return changed;
 }

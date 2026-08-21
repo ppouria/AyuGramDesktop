@@ -9,25 +9,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_reactions_notify_settings.h"
 #include "api/api_text_entities.h"
-#include "apiwrap.h"
-#include "ayu/ayu_settings.h"
-#include "ayu/utils/telegram_helpers.h"
-#include "base/unixtime.h"
 #include "boxes/premium_preview_box.h"
 #include "calls/calls_instance.h"
-#include "core/application.h"
-#include "core/click_handler_types.h" // ClickHandlerContext.
 #include "data/components/ephemeral_messages.h"
 #include "data/components/sponsored_messages.h"
-#include "data/notify/data_notify_settings.h"
 #include "data/stickers/data_custom_emoji.h"
-#include "data/data_changes.h"
+#include "data/notify/data_notify_settings.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
+#include "data/data_changes.h"
 #include "data/data_document.h"
+#include "data/data_group_call.h"
 #include "data/data_forum.h"
 #include "data/data_forum_topic.h"
-#include "data/data_group_call.h"
 #include "data/data_message_reactions.h"
 #include "data/data_poll.h"
 #include "data/data_premium_limits.h"
@@ -37,13 +31,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/controls/history_view_suggest_options.h"
 #include "history/history.h"
 #include "history/history_item_components.h"
-#include "lang/lang_keys.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "menu/menu_sponsored.h"
 #include "platform/platform_notifications_manager.h"
+#include "window/window_controller.h"
+#include "window/window_session_controller.h"
+#include "apiwrap.h"
+#include "base/unixtime.h"
+#include "core/application.h"
+#include "core/click_handler_types.h" // ClickHandlerContext.
 #include "settings/settings_credits_graphics.h"
 #include "storage/storage_account.h"
 #include "ui/boxes/confirm_box.h"
@@ -53,10 +52,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/toast/toast.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/item_text_options.h"
-#include "window/window_controller.h"
-#include "window/window_session_controller.h"
+#include "lang/lang_keys.h"
 
 #include "styles/style_layers.h"
+
+// AyuGram includes
+#include "ayu/ayu_settings.h"
+#include "ayu/utils/telegram_helpers.h"
+
 
 namespace {
 
@@ -925,6 +928,9 @@ MessageFlags FlagsFromMTP(
 			? Flag::IsOrWasScheduled
 			: Flag())
 		| ((flags & MTP::f_views) ? Flag::HasViews : Flag())
+		// AyuGram: removed
+		// | ((flags & MTP::f_noforwards) ? Flag::NoForwards : Flag())
+		| (flags & MTP::f_noforwards ? Flag::AyuNoForwards : Flag())
 		| ((flags & MTP::f_invert_media) ? Flag::InvertMedia : Flag())
 		| ((flags & MTP::f_video_processing_pending)
 			? Flag::EstimatedDate
@@ -1413,9 +1419,9 @@ HistoryMessageMarkupData UnsupportedMessageMarkup() {
 	auto row = std::vector<Button>();
 	row.emplace_back(
 		Button::Type::Url,
-		tr::lng_update_telegram(tr::now),
+		tr::lng_update_telegram(tr::now).replace("Telegram", "AyuGram"),
 		Button::Visual(),
-		QByteArray("https://desktop.telegram.org"));
+		QByteArray("https://t.me/AyuGramReleases"));
 	markup.rows.push_back(std::move(row));
 	return markup;
 }

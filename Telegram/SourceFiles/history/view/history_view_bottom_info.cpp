@@ -39,7 +39,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ayu/ayu_settings.h"
 #include "ayu/features/message_shot/message_shot.h"
 #include "ayu/utils/telegram_helpers.h"
-#include "core/ui_integration.h"
 #include "styles/style_ayu_icons.h"
 
 
@@ -512,10 +511,8 @@ void BottomInfo::layoutDateText() {
 		const auto date = editedPrimary
 			? FormatEditedDate(_data.date, _data.editedDate)
 			: edited + ((_data.flags & Data::Flag::ForwardedDate)
-				? Ui::FormatDateTimeSavedFrom(_data.date)
-				: QLocale().toString(
-					_data.date.time(),
-					QLocale::ShortFormat));
+			? Ui::FormatDateTimeSavedFrom(_data.date)
+			: formatMessageTime(_data.date.time()));
 		const auto afterAuthor = prefix + date;
 		const auto afterAuthorWidth = st::msgDateFont->width(afterAuthor);
 		const auto authorWidth = st::msgDateFont->width(author);
@@ -564,11 +561,23 @@ void BottomInfo::layoutDateText() {
 			Ui::NameTextOptions(),
 			helper.context());
 	} else {
+		const auto editedIcon = !editedPrimary
+			&& (_data.flags & Data::Flag::Edited);
+
+		TextWithEntities edited;
+		if (editedIcon) {
+			edited = Ui::Text::IconEmoji(&st::editedIcon);
+			edited.append(' ');
+		} else if (!editedPrimary && (_data.flags & Data::Flag::EstimateDate)) {
+			edited = TextWithEntities{ tr::lng_approximate(tr::now) + ' ' };
+		} else if (!editedPrimary && _data.scheduleRepeatPeriod) {
+			edited = TextWithEntities{ SchedulePeriodText(_data.scheduleRepeatPeriod) + ' ' };
+		}
+
 		TextWithEntities burnt;
 		if (_data.flags & Data::Flag::AyuBurnt) {
 			burnt = Ui::Text::IconEmoji(&st::burntIcon);
-			if (!(_data.flags & Data::Flag::AyuDeleted)
-				&& (!(_data.flags & Data::Flag::Edited) || editedPrimary)) {
+			if (!(_data.flags & Data::Flag::AyuDeleted) && edited.empty()) {
 				burnt.append(' ');
 			}
 		}
@@ -576,33 +585,21 @@ void BottomInfo::layoutDateText() {
 		TextWithEntities deleted;
 		if (_data.flags & Data::Flag::AyuDeleted) {
 			deleted = Ui::Text::IconEmoji(&st::deletedIcon);
-			if (!(_data.flags & Data::Flag::Edited) || editedPrimary) {
+			if (edited.empty()) {
 				deleted.append(' ');
 			}
 		}
 
-		TextWithEntities edited;
-		if ((_data.flags & Data::Flag::Edited) && !editedPrimary) {
-			edited = Ui::Text::IconEmoji(&st::editedIcon);
-			edited.append(' ');
-		} else if (_data.flags & Data::Flag::EstimateDate) {
-			edited = TextWithEntities{ tr::lng_approximate(tr::now) + ' ' };
-		} else if (_data.scheduleRepeatPeriod) {
-			edited = TextWithEntities{ SchedulePeriodText(_data.scheduleRepeatPeriod) + ' ' };
-		}
-
 		const auto author = settings.filterZalgo() ? filterZalgo(_data.author) : _data.author;
 		const auto prefix = !author.isEmpty()
-			? ((_data.flags & Data::Flag::Edited) && !editedPrimary
-				? u" "_q
-				: u", "_q)
+			? (editedIcon ? u" "_q : u", "_q)
 			: QString();
 
 		const auto dateStr = editedPrimary
 			? FormatEditedDate(_data.date, _data.editedDate)
 			: (_data.flags & Data::Flag::ForwardedDate)
 			? Ui::FormatDateTimeSavedFrom(_data.date)
-			: QLocale().toString(_data.date.time(), QLocale::ShortFormat);
+			: formatMessageTime(_data.date.time());
 
 		const auto date = TextWithEntities{}
 			.append(edited)

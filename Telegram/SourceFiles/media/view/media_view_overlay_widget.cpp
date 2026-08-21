@@ -127,6 +127,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <kurlmimedata.h>
 
 // AyuGram includes
+#include "ayu/ayu_settings.h"
 #include "ayu/ayu_state.h"
 #include "ayu/features/streamer_mode/streamer_mode.h"
 
@@ -4351,7 +4352,7 @@ void OverlayWidget::activate() {
 	QApplication::setActiveWindow(_window);
 	setFocus();
 
-	if (AyuFeatures::StreamerMode::isEnabled()) {
+	if (AyuSettings::getInstance().streamerMode()) {
 		AyuFeatures::StreamerMode::hideWidgetWindow(_window);
 	} else {
 		AyuFeatures::StreamerMode::showWidgetWindow(_window);
@@ -8321,7 +8322,9 @@ void OverlayWidget::handleMouseRelease(
 }
 
 bool OverlayWidget::handleContextMenu(std::optional<QPoint> position) {
-	if (position) {
+	if (_layerBg->topShownLayer()) {
+		return false;
+	} else if (position) {
 		if (!QRect(_x, _y, _w, _h).contains(*position)
 				|| position->y() <= st::mediaviewTitleButton.height) {
 			return false;

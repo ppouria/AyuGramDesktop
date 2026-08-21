@@ -7,7 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_item_text.h"
 
-#include "api/api_transcribes.h"
+#include "data/data_forum_topic.h"
 #include "data/data_groups.h"
 #include "data/data_media_types.h"
 #include "data/data_peer.h"
@@ -16,8 +16,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_story.h"
 #include "data/data_todo_list.h"
 #include "data/data_web_page.h"
-#include "history/view/history_view_item_preview.h"
 #include "history/history.h"
+#include "history/view/history_view_item_preview.h"
 #include "history/history_item.h"
 #include "history/history_item_components.h"
 #include "history/history_item_helpers.h"
@@ -26,6 +26,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_entity.h"
 #include "ui/text/text_options.h"
 #include "ui/text/text_utilities.h"
+
+// AyuGram includes
+#include "api/api_transcribes.h"
+
 
 namespace {
 
@@ -78,6 +82,13 @@ TextForMimeData AppendExtraCopyText(
 		result.append(u"\n\n"_q).append(std::move(factcheckResult));
 	}
 	return result;
+}
+
+TextForMimeData ShownSummaryText(not_null<HistoryItem*> item) {
+	const auto &summary = item->summaryEntry();
+	return (!summary.result.empty() && summary.shown)
+		? TextForMimeData::WithExpandedLinks(summary.result)
+		: TextForMimeData();
 }
 
 TextForMimeData HistoryItemMainText(not_null<HistoryItem*> item) {
@@ -362,6 +373,19 @@ std::optional<SelectedCopyReplyContext> ReplyContextForSelectedCopy(
 	if (!reply) {
 		return std::nullopt;
 	}
+	const auto &fields = reply->fields();
+	const auto hasExternalProvenance = fields.externalSenderId
+		|| !fields.externalSenderName.isEmpty()
+		|| !fields.externalPostAuthor.isEmpty();
+	if (item->history()->isForum()
+		&& reply->topicPost()
+		&& !hasExternalProvenance
+		&& item->replyToFullId() == FullMsgId(
+			item->history()->peer->id,
+			item->topicRootId())
+		&& !reply->manualQuote()) {
+		return std::nullopt;
+	}
 	const auto replyPointer = not_null{ reply };
 	const auto senderName = ReplySenderNameForSelectedCopy(
 		item,
@@ -369,7 +393,6 @@ std::optional<SelectedCopyReplyContext> ReplyContextForSelectedCopy(
 	if (senderName.isEmpty()) {
 		return std::nullopt;
 	}
-	const auto &fields = reply->fields();
 	auto quote = (reply->manualQuote() && !fields.quote.empty())
 		? TextUtilities::SingleLine(fields.quote)
 		: LimitNonExactReplyPreview(StripIconEmoji(
@@ -394,12 +417,46 @@ TextForMimeData HistorySelectedItemPlainWrappedText(
 	return result;
 }
 
+std::vector<not_null<Data::ForumTopic*>> TopicsForSelectedCopy(
+		const std::vector<HistorySelectedTextEntry> &entries) {
+	if (entries.size() < 2) {
+		return {};
+	}
+	const auto history = entries.front().item->history();
+	if (!history->isForum()) {
+		return {};
+	}
+	auto result = std::vector<not_null<Data::ForumTopic*>>();
+	result.reserve(entries.size());
+	auto firstRootId = MsgId();
+	auto multipleRoots = false;
+	for (const auto &entry : entries) {
+		if (entry.item->history() != history) {
+			return {};
+		}
+		const auto topic = entry.item->topic();
+		if (!topic || topic->title().isEmpty()) {
+			return {};
+		}
+		if (result.empty()) {
+			firstRootId = topic->rootId();
+		} else if (topic->rootId() != firstRootId) {
+			multipleRoots = true;
+		}
+		result.push_back(not_null{ topic });
+	}
+	if (!multipleRoots) {
+		return {};
+	}
+	return result;
+}
+
 } // namespace
 
 TextForMimeData HistoryItemText(not_null<HistoryItem*> item) {
-	const auto &summary = item->summaryEntry();
-	if (summary.shown && !summary.result.empty()) {
-		return TextForMimeData::WithExpandedLinks(summary.result);
+	auto summary = ShownSummaryText(item);
+	if (!summary.empty()) {
+		return summary;
 	}
 	return AppendExtraCopyText(item, HistoryItemMainText(item));
 }
@@ -449,7 +506,13 @@ TextForMimeData HistoryGroupText(not_null<const Data::Group*> group) {
 	}();
 }
 
+namespace {
+
 TextForMimeData HistoryItemTextForSelectedCopy(not_null<HistoryItem*> item) {
+	auto summary = ShownSummaryText(item);
+	if (!summary.empty()) {
+		return summary;
+	}
 	const auto media = item->media();
 	if (!media) {
 		return HistoryItemText(item);
@@ -525,6 +588,48 @@ TextForMimeData HistorySelectedItemWrappedText(
 		result.append(u"\n> "_q).append(std::move(context->quote));
 		if (!body.empty()) {
 			result.append('\n').append(std::move(body));
+		}
+	}
+	return result;
+}
+
+} // namespace
+
+TextForMimeData HistorySelectedItemsText(
+		const std::vector<HistorySelectedTextEntry> &entries,
+		bool richContext) {
+	const auto topics = TopicsForSelectedCopy(entries);
+	auto result = TextForMimeData();
+	const auto separator = u"\n"_q;
+	for (auto i = 0, count = int(entries.size()); i != count; ++i) {
+		const auto &entry = entries[i];
+		if (!topics.empty()
+			&& (!i || topics[i]->rootId() != topics[i - 1]->rootId())) {
+			result
+				.append(u"[--- "_q)
+				.append(tr::lng_sr_chat_topic(tr::now))
+				.append(u" \""_q)
+				.append(topics[i]->title())
+				.append(u"\" ---]"_q)
+				.append(separator);
+		}
+		auto body = TextForMimeData();
+		if (entry.group) {
+			const auto group = not_null<const Data::Group*>{ entry.group };
+			body = richContext
+				? HistoryGroupTextForSelectedCopy(group)
+				: HistoryGroupText(group);
+		} else {
+			body = richContext
+				? HistoryItemTextForSelectedCopy(entry.item)
+				: HistoryItemText(entry.item);
+		}
+		result.append(HistorySelectedItemWrappedText(
+			entry.item,
+			std::move(body),
+			richContext));
+		if (i + 1 != count) {
+			result.append(separator);
 		}
 	}
 	return result;

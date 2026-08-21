@@ -105,6 +105,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 // AyuGram includes
 #include "ayu/ayu_infra.h"
+#include "ayu/ayu_settings.h"
 #include "ayu/features/streamer_mode/streamer_mode.h"
 
 
@@ -546,7 +547,7 @@ void Application::processCreatedWindow(
 	window->openInMediaViewRequests(
 	) | rpl::start_to_stream(_openInMediaViewRequests, window->lifetime());
 
-	if (AyuFeatures::StreamerMode::isEnabled()) {
+	if (AyuSettings::getInstance().streamerMode()) {
 		AyuFeatures::StreamerMode::hideWidgetWindow(window->widget());
 	}
 }
@@ -1157,6 +1158,9 @@ bool Application::canApplyLangPackWithoutRestart() const {
 }
 
 void Application::checkStartUrls() {
+	if (_setupEmailLock.current()) {
+		return;
+	}
 	if (!Core::App().passcodeLocked()) {
 		cRefStartUrls() = ranges::views::all(
 			cRefStartUrls()
@@ -1328,6 +1332,7 @@ rpl::producer<bool> Application::passcodeLockValue() const {
 
 void Application::lockBySetupEmail() {
 	_setupEmailLock = true;
+	closeAdditionalWindows();
 	enumerateWindows([&](not_null<Window::Controller*> w) {
 		w->setupSetupEmailLock();
 	});
@@ -1338,6 +1343,7 @@ void Application::unlockSetupEmail() {
 	enumerateWindows([&](not_null<Window::Controller*> w) {
 		w->clearSetupEmailLock();
 	});
+	checkStartUrls();
 }
 
 bool Application::someSessionExists() const {

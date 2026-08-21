@@ -47,9 +47,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_window.h"
 #include "styles/style_menu_icons.h"
 
+#include <QtGui/QtEvents>
+
+// AyuGram includes
 #include "ayu/ayu_settings.h"
 
-#include <QtGui/QtEvents>
 
 namespace Window {
 namespace {
@@ -346,6 +348,7 @@ bool FiltersMenu::listFocused() const {
 }
 
 void FiltersMenu::refresh() {
+	// AyuGram hideAllChatsFolder
 	const auto &settings = AyuSettings::getInstance();
 
 	const auto filters = &_session->session().data().chatsFilters();
@@ -429,10 +432,10 @@ void FiltersMenu::refresh() {
 	_scroll.scrollToY(oldTop);
 
 	if (settings.hideAllChatsFolder()
-		&& !_session->activeChatsFilterCurrent()
 		&& _session->widget()->sessionContent()) {
 		_session->setActiveChatsFilter(filters->lookupId(0));
 	}
+
 	if (refocus) {
 		refocus->setFocus();
 		scrollToButton(refocus);
@@ -826,6 +829,7 @@ void FiltersMenu::applyReorder(
 		return;
 	}
 
+	// AyuGram hideAllChatsFolder
 	const auto &settings = AyuSettings::getInstance();
 
 	const auto filters = &_session->session().data().chatsFilters();

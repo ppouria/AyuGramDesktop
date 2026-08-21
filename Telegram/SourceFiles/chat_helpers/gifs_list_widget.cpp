@@ -132,7 +132,11 @@ GifsListWidget::GifsListWidget(
 
 	session().data().stickers().savedGifsUpdated(
 	) | rpl::on_next([=] {
-		refreshSavedGifs();
+		if (underMouse()) {
+			_refreshDelayed = true;
+		} else {
+			refreshSavedGifs();
+		}
 	}, lifetime());
 
 	session().downloaderTaskFinished(
@@ -424,7 +428,7 @@ base::unique_qptr<Ui::PopupMenu> GifsListWidget::fillContextMenu(
 			crl::guard(this, [=] {
 				selectInlineResult(selected, {}, true, true);
 			}),
-			&st::menuIconEdit);
+			&icons->menuGifCaption);
 	}
 
 	if (const auto item = _mosaic.maybeItemAt(_selected)) {
@@ -523,25 +527,27 @@ void GifsListWidget::selectInlineResult(
 		const auto media = document->activeMediaView();
 		const auto preview = Data::VideoPreviewState(media.get());
 		if (forceSend || (media && preview.loaded())) {
-			const auto from = messageSendingFrom();
-			const auto sendGif = crl::guard(this, [=] {
-				_fileChosen.fire({
-					.document = document,
-					.options = options,
-					.messageSendingFrom = from,
-					.needsCaption = needsCaption,
+			auto from = messageSendingFrom();
+			auto sendGIFCallback = crl::guard(
+				this,
+				[=] {
+					_fileChosen.fire({
+						.document = document,
+						.options = options,
+						.messageSendingFrom = from,
+						.needsCaption = needsCaption,
+					});
 				});
-			});
 
 			const auto &settings = AyuSettings::getInstance();
-			if (settings.gifConfirmation()) {
+			if (settings.gifConfirmation() && !needsCaption) {
 				_show->showBox(Ui::MakeConfirmBox({
 					.text = tr::ayu_ConfirmationGIF(),
-					.confirmed = sendGif,
-					.confirmText = tr::lng_send_button(),
+					.confirmed = sendGIFCallback,
+					.confirmText = tr::lng_send_button()
 				}));
 			} else {
-				sendGif();
+				sendGIFCallback();
 			}
 		} else if (!preview.usingThumbnail()) {
 			if (preview.loading()) {
@@ -572,10 +578,16 @@ void GifsListWidget::mouseMoveEvent(QMouseEvent *e) {
 
 void GifsListWidget::leaveEventHook(QEvent *e) {
 	clearSelection();
+	if (base::take(_refreshDelayed)) {
+		refreshSavedGifs();
+	}
 }
 
 void GifsListWidget::leaveToChildEvent(QEvent *e, QWidget *child) {
 	clearSelection();
+	if (base::take(_refreshDelayed)) {
+		refreshSavedGifs();
+	}
 }
 
 void GifsListWidget::enterFromChildEvent(QEvent *e, QWidget *child) {
@@ -623,6 +635,7 @@ void GifsListWidget::clearHeavyData() {
 }
 
 void GifsListWidget::refreshSavedGifs() {
+	_refreshDelayed = false;
 	if (_section == Section::Gifs) {
 		clearInlineRows(false);
 

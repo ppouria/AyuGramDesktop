@@ -648,10 +648,9 @@ void SetupRows(
 		targets->name = nameButton;
 	}
 
-	const auto showChangePhone = [=] {
-		controller->show(
-			Ui::MakeInformBox(tr::lng_change_phone_error()));
-		controller->window().activate();
+	const auto copyPhone = [=] {
+		QGuiApplication::clipboard()->setText(self->phone());
+		controller->showToast(tr::lng_text_copied(tr::now), 500);
 	};
 	const auto phoneButton = AddRow(
 		container,
@@ -660,7 +659,7 @@ void SetupRows(
 			self,
 			Info::Profile::PhoneValue(self)),
 		tr::lng_profile_copy_phone(tr::now),
-		showChangePhone,
+		copyPhone,
 		{ &st::menuIconPhone },
 		true,
 		[=](not_null<Ui::PopupMenu*> menu) {

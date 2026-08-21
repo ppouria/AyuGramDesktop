@@ -7,23 +7,25 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "ui/unread_badge.h"
 
-#include "ayu/utils/telegram_helpers.h"
-#include "ayu/ayu_settings.h"
-#include "data/stickers/data_custom_emoji.h"
 #include "data/data_emoji_statuses.h"
 #include "data/data_peer.h"
-#include "data/data_session.h"
 #include "data/data_user.h"
-#include "lang/lang_keys.h"
+#include "data/data_session.h"
+#include "data/stickers/data_custom_emoji.h"
 #include "main/main_session.h"
+#include "lang/lang_keys.h"
 #include "ui/painter.h"
-#include "ui/power_saving.h"
 #include "ui/rect.h"
+#include "ui/power_saving.h"
 #include "ui/text/text_custom_emoji.h"
 #include "ui/unread_badge_paint.h"
-
 #include "styles/style_dialogs.h"
+
+// AyuGram includes
+#include "ayu/ayu_settings.h"
+#include "ayu/utils/telegram_helpers.h"
 #include "styles/style_info.h"
+
 
 namespace Ui {
 namespace {

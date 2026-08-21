@@ -49,13 +49,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QGuiApplication>
 #include <QtGui/QScreen>
 
+#if __has_include(<gio/gio.hpp>)
+#include <gio/gio.hpp>
+#endif // __has_include(<gio/gio.hpp>)
+
 // AyuGram includes
 #include "ayu/ayu_settings.h"
 #include "ayu/utils/telegram_helpers.h"
 
-#if __has_include(<gio/gio.hpp>)
-#include <gio/gio.hpp>
-#endif // __has_include(<gio/gio.hpp>)
 
 namespace Window {
 namespace Notifications {
@@ -179,7 +180,8 @@ base::options::toggle HideReplyButtonOption({
 }
 
 [[nodiscard]] bool AllowNotificationActions(not_null<PeerData*> peer) {
-	return Platform::IsMac() && peer->isNotificationsUser();
+	return (Platform::IsMac() || Platform::IsLinux())
+		&& peer->isNotificationsUser();
 }
 
 } // namespace

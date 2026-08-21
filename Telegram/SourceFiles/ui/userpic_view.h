@@ -9,8 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/weak_ptr.h"
 
-#include <QtGui/QColor>
 #include <QtGui/QImage>
+#include <QtGui/QColor>
 
 class QPainter;
 

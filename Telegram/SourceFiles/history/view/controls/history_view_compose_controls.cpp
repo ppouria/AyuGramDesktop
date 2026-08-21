@@ -122,9 +122,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat_helpers.h"
 #include "styles/style_credits.h"
 #include "styles/style_iv.h"
+#include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
 
 // AyuGram includes
+#include "data/data_ai_compose_tones.h"
 #include "ayu/ayu_settings.h"
 #include "history/history_item_components.h"
 
@@ -790,7 +792,7 @@ void FieldHeader::paintForwardInfo(Painter &p) {
 
 void FieldHeader::updateVisible() {
 	isDisplayed() ? show() : hide();
-	_visibleChanged.fire(!isHidden());
+	_visibleChanged.fire(isVisible());
 }
 
 rpl::producer<bool> FieldHeader::visibleChanged() {
@@ -1091,6 +1093,9 @@ ComposeControls::ComposeControls(
 , _expand(Ui::CreateChild<Ui::IconButton>(
 	_wrap.get(),
 	st::historyExpandComposeButton))
+, _discardRichDraft(Ui::CreateChild<Ui::IconButton>(
+	_wrap.get(),
+	st::historyDiscardRichDraftButton))
 , _like(_features.likes
 	? Ui::CreateChild<Ui::IconButton>(_wrap.get(), _st.like)
 	: nullptr)
@@ -1134,7 +1139,7 @@ ComposeControls::ComposeControls(
 , _header(std::make_unique<FieldHeader>(
 	_wrap.get(),
 	_show,
-	[=] { return !_field->isHidden() && HasSendText(_field); }))
+	[=] { return _field->isVisible() && HasSendText(_field); }))
 , _voiceRecordBar(std::make_unique<VoiceRecordBar>(
 	_wrap.get(),
 	Controls::VoiceRecordBarDescriptor{
@@ -1143,7 +1148,7 @@ ComposeControls::ComposeControls(
 		.send = _send,
 		.customCancelText = descriptor.voiceCustomCancelText,
 		.stOverride = &_st.record,
-		.recorderHeight = st::historySendSize.height(),
+		.recorderHeight = _st.attach.height,
 		.lockFromBottom = descriptor.voiceLockFromBottom,
 	}))
 , _sendMenuDetails(descriptor.sendMenuDetails)
@@ -2020,6 +2025,7 @@ void ComposeControls::showFinished() {
 		_sendAsFile->raise();
 	}
 	_expand->raise();
+	_discardRichDraft->raise();
 	if (_aiTooltipManager) {
 		_aiTooltipManager->raise();
 	}
@@ -2174,6 +2180,30 @@ bool ComposeControls::shouldShowRichDraftPreview() const {
 		&& draft->hasRichMessage();
 }
 
+void ComposeControls::clearRichDraft() {
+	if (!_history) {
+		return;
+	}
+	clearFieldText();
+	if (const auto key = draftKey(DraftType::Normal)) {
+		_history->clearDraft(key);
+	}
+	_history->clearCloudDraft(_topicRootId, _monoforumPeerId);
+	applyDraft(Ui::InputField::HistoryAction::NewEntry);
+	if (const auto thread = _history->threadFor(
+			_topicRootId,
+			_monoforumPeerId)) {
+		if (const auto cloudDraft = _history->createCloudDraft(
+				_topicRootId,
+				_monoforumPeerId,
+				nullptr)) {
+			session().api().saveDraftToCloud(
+				not_null{ thread },
+				*cloudDraft);
+		}
+	}
+}
+
 void ComposeControls::migrateFieldToRichEditor() {
 	if (!_history) {
 		return;
@@ -2181,24 +2211,7 @@ void ComposeControls::migrateFieldToRichEditor() {
 	if (isEditingMessage()) {
 		cancelEditMessage();
 	} else {
-		clearFieldText();
-		if (const auto key = draftKey(DraftType::Normal)) {
-			_history->clearDraft(key);
-		}
-		applyDraft(Ui::InputField::HistoryAction::NewEntry);
-		_history->clearCloudDraft(_topicRootId, _monoforumPeerId);
-		if (const auto thread = _history->threadFor(
-				_topicRootId,
-				_monoforumPeerId)) {
-			if (const auto cloudDraft = _history->createCloudDraft(
-					_topicRootId,
-					_monoforumPeerId,
-					nullptr)) {
-				session().api().saveDraftToCloud(
-					not_null{ thread },
-					*cloudDraft);
-			}
-		}
+		clearRichDraft();
 	}
 }
 
@@ -2272,6 +2285,7 @@ void ComposeControls::init() {
 	initAiButton();
 	initSendAsFileButton();
 	initExpandButton();
+	initDiscardRichDraftButton();
 	initWriteRestriction();
 	initVoiceRecordBar();
 	initKeyHandler();
@@ -2464,6 +2478,7 @@ void ComposeControls::init() {
 		AyuSettings::getInstance().showEmojiButtonInMessageFieldChanges() | rpl::to_empty,
 		AyuSettings::getInstance().showMicrophoneButtonInMessageFieldChanges() | rpl::to_empty,
 		AyuSettings::getInstance().showAutoDeleteButtonInMessageFieldChanges() | rpl::to_empty,
+		session().data().aiComposeTones().updated() | rpl::to_empty,
 		AyuSettings::getInstance().showAiEditorButtonInMessageFieldChanges() | rpl::to_empty,
 		AyuSettings::getInstance().showAttachPopupChanges() | rpl::to_empty,
 		AyuSettings::getInstance().showEmojiPopupChanges() | rpl::to_empty,
@@ -2822,7 +2837,7 @@ void ComposeControls::fieldChanged() {
 		&& (_textUpdateEvents & TextUpdateEvent::SendTyping)
 		&& !suppressSendAction());
 	updateSendButtonType();
-	_hasSendText = !_field->isHidden() && HasSendText(_field);
+	_hasSendText = _field->isVisible() && HasSendText(_field);
 	if (updateBotCommandShown() || updateLikeShown()) {
 		updateControlsVisibility();
 		updateControlsGeometry(_wrap->size());
@@ -3035,6 +3050,7 @@ void ComposeControls::updateFieldVisibility() {
 	updateBotCommandShown();
 	updateLikeShown();
 	updateSendLockBadge();
+	updateDiscardRichDraftVisibility();
 }
 
 void ComposeControls::writeDrafts() {
@@ -3293,10 +3309,13 @@ void ComposeControls::initTabbedSelector() {
 				crl::guard(_field, [=](
 						Api::SendOptions options,
 						TextWithTags caption) {
+					const auto effectiveFrom = options.scheduled
+						? Ui::MessageSendingAnimationFrom()
+						: from;
 					_fileChosen.fire({
 						.document = document,
 						.options = options,
-						.messageSendingFrom = from,
+						.messageSendingFrom = effectiveFrom,
 						.caption = std::move(caption),
 					});
 				}));
@@ -3748,7 +3767,7 @@ void ComposeControls::initVoiceRecordBar() {
 			});
 		}
 		_field
-			&& !_field->isHidden()
+			&& _field->isVisible()
 			&& Data::CanSendTexts(_history->peer)
 			&& request->check(Command::ComposeAiApplyInPlace, 1)
 			&& request->handle([=] {
@@ -3809,6 +3828,30 @@ void ComposeControls::initSendAsFileButton() {
 		tr::lng_send_as_file_tooltip(tr::rich),
 		"send_as_file_tooltip_hidden"_cs,
 		[=] { return _wrap->width(); });
+}
+
+void ComposeControls::initDiscardRichDraftButton() {
+	_discardRichDraft->hide();
+	_richDraftPreview->shownValue(
+	) | rpl::on_next([=] {
+		updateDiscardRichDraftVisibility();
+	}, _wrap->lifetime());
+	_discardRichDraft->setAccessibleName(
+		tr::lng_record_lock_discard(tr::now));
+	_discardRichDraft->setClickedCallback([=] {
+		if (!shouldShowRichDraftPreview()) {
+			return;
+		}
+		_show->show(Ui::MakeConfirmBox({
+			.text = tr::lng_iv_editor_discard_draft_sure(tr::now),
+			.confirmed = crl::guard(_wrap.get(), [=](Fn<void()> close) {
+				clearRichDraft();
+				close();
+			}),
+			.confirmText = tr::lng_record_lock_discard(),
+			.confirmStyle = &st::attentionBoxButton,
+		}));
+	});
 }
 
 void ComposeControls::initExpandButton() {
@@ -3977,6 +4020,7 @@ void ComposeControls::updateWrappingVisibility() {
 	updateAiButtonVisibility();
 	updateSendAsFileVisibility();
 	updateExpandButtonVisibility();
+	updateDiscardRichDraftVisibility();
 	if (!hidden && !restricted) {
 		updateControlsGeometry(_wrap->size());
 		_wrap->raise();
@@ -4008,7 +4052,7 @@ SendMenu::Details ComposeControls::sendMenuDetails() const {
 }
 
 SendMenu::Details ComposeControls::saveMenuDetails() const {
-	return _header->saveMenuDetails(!_field->isHidden() && HasSendText(_field));
+	return _header->saveMenuDetails(_field->isVisible() && HasSendText(_field));
 }
 
 SendMenu::Details ComposeControls::sendButtonMenuDetails() const {
@@ -4073,61 +4117,39 @@ void ComposeControls::finishAnimating() {
 	_voiceRecordBar->finishAnimating();
 }
 
-auto ComposeControls::controlsVisibility() const
--> ControlsVisibility {
-	const auto &settings = AyuSettings::getInstance();
-	const auto hide = hideExtraButtons();
-	return {
-		.attach = (_attachToggle
-			&& settings.showAttachButtonInMessageField()
-			&& !_replaceMedia),
-		.replaceMedia = (_replaceMedia != nullptr),
-		.botCommand = (_botCommandStart
-			&& _botCommandShown
-			&& settings.showCommandsButtonInMessageField()),
-		.emoji = settings.showEmojiButtonInMessageField(),
-		.silent = (_silent && !hide),
-		.scheduled = (_scheduled && !isEditingMessage() && !hide),
-		.ttl = (_ttlInfo
-			&& settings.showAutoDeleteButtonInMessageField()
-			&& !hide),
-	};
-}
-
 void ComposeControls::updateControlsGeometry(QSize size) {
 	// (_commentsShown) (_attachToggle|_replaceMedia) (_sendAs) -- _inlineResults ------ _tabbedPanel -- _fieldBarCancel (_starsReaction)
 	// (_attachDocument|_attachPhoto) _field (_ttlInfo) (_scheduled) (_silent|_botCommandStart) _tabbedSelectorToggle _send
 
+	const auto &settings = AyuSettings::getInstance();
+
 	const auto oldComposeHeight = shouldShowRichDraftPreview()
 		? _richDraftPreview->height()
 		: _field->height();
-	const auto visibility = controlsVisibility();
-	const auto mediaButtonShown = visibility.replaceMedia || visibility.attach;
-	const auto mediaButtonWidth = visibility.replaceMedia
-		? _replaceMedia->width()
-		: visibility.attach
-		? _attachToggle->width()
-		: 0;
 	const auto commentsShown = _commentsShown
 		&& !_commentsShown->isHidden();
 	const auto fieldWidth = size.width()
 		- (commentsShown
 			? (_commentsShown->width() + _st.commentsSkip)
 			: 0)
-		- ((mediaButtonShown || _sendAs)
-			? _st.padding.left()
-			: _st.fieldLeft)
-		- mediaButtonWidth
+		- (((_attachToggle && settings.showAttachButtonInMessageField()) || _sendAs) ? _st.padding.left() : _st.fieldLeft)
+		- (_attachToggle && settings.showAttachButtonInMessageField() ? _attachToggle->width() : 0)
 		- (_sendAs ? _sendAs->width() : 0)
 		- _st.padding.right()
 		- _send->width()
 		- (_editStars ? _editStars->width() : 0)
-		- (visibility.emoji ? _tabbedSelectorToggle->width() : 0)
+		- (settings.showEmojiButtonInMessageField() ? _tabbedSelectorToggle->width() : 0)
 		- (_likeShown ? _like->width() : 0)
-		- (visibility.botCommand ? _botCommandStart->width() : 0)
-		- (visibility.silent ? _silent->width() : 0)
-		- (visibility.scheduled ? _scheduled->width() : 0)
-		- (visibility.ttl ? _ttlInfo->width() : 0)
+		- (_botCommandShown && settings.showCommandsButtonInMessageField() ? _botCommandStart->width() : 0)
+		- ((_silent && !_silent->isHidden()) ? _silent->width() : 0)
+		- ((_scheduled && !_scheduled->isHidden())
+			? _scheduled->width()
+			: 0)
+		- ((_ttlInfo
+			&& _ttlInfo->isVisible()
+			&& settings.showAutoDeleteButtonInMessageField())
+			? _ttlInfo->width()
+			: 0)
 		- (_starsReaction
 			? (_st.starsSkip + _starsReaction->width())
 			: 0);
@@ -4156,13 +4178,11 @@ void ComposeControls::updateControlsGeometry(QSize size) {
 		_commentsShown->moveToLeft(left, buttonsTop);
 		left += _commentsShown->width() + _st.commentsSkip;
 	}
-	left += (mediaButtonShown || _sendAs)
-		? _st.padding.left()
-		: _st.fieldLeft;
-	if (visibility.replaceMedia) {
+	left += (_attachToggle || _sendAs) ? _st.padding.left() : _st.fieldLeft;
+	if (_replaceMedia) {
 		_replaceMedia->moveToLeft(left, buttonsTop);
-		left += _replaceMedia->width();
-	} else if (visibility.attach) {
+	}
+	if (_attachToggle && settings.showAttachButtonInMessageField()) {
 		_attachToggle->moveToLeft(left, buttonsTop);
 		left += _attachToggle->width();
 	}
@@ -4196,7 +4216,7 @@ void ComposeControls::updateControlsGeometry(QSize size) {
 		_editStars->moveToRight(right, buttonsTop);
 		right += _editStars->width();
 	}
-	if (visibility.emoji) {
+	if (settings.showEmojiButtonInMessageField()) {
 		_tabbedSelectorToggle->moveToRight(right, buttonsTop);
 		right += _tabbedSelectorToggle->width();
 	}
@@ -4213,28 +4233,29 @@ void ComposeControls::updateControlsGeometry(QSize size) {
 	}
 	if (_botCommandStart) {
 		_botCommandStart->moveToRight(right, buttonsTop);
-		if (visibility.botCommand) {
+		if (_botCommandShown && settings.showCommandsButtonInMessageField()) {
 			right += _botCommandStart->width();
 		}
 	}
 	if (_silent) {
 		_silent->moveToRight(right, buttonsTop);
-		if (visibility.silent) {
+		if (!_silent->isHidden()) {
 			right += _silent->width();
 		}
 	}
 	if (_scheduled) {
 		_scheduled->moveToRight(right, buttonsTop);
-		if (visibility.scheduled) {
+		if (!_scheduled->isHidden()) {
 			right += _scheduled->width();
 		}
 	}
-	if (visibility.ttl) {
+	if (_ttlInfo && settings.showAutoDeleteButtonInMessageField()) {
 		_ttlInfo->move(size.width() - right - _ttlInfo->width(), buttonsTop);
 	}
 	updateAiButtonGeometry();
 	updateSendAsFileGeometry();
 	updateExpandButtonGeometry();
+	updateDiscardRichDraftGeometry();
 
 	_voiceRecordBar->resizeToWidth(size.width());
 	_voiceRecordBar->moveToLeft(
@@ -4243,9 +4264,11 @@ void ComposeControls::updateControlsGeometry(QSize size) {
 }
 
 void ComposeControls::updateControlsVisibility() {
-	const auto visibility = controlsVisibility();
+	const auto &settings = AyuSettings::getInstance();
+
+	const auto hide = hideExtraButtons();
 	if (_botCommandStart) {
-		SWITCH_BUTTON(_botCommandStart, visibility.botCommand);
+		SWITCH_BUTTON(_botCommandStart, _botCommandShown && settings.showCommandsButtonInMessageField());
 	}
 	if (_like) {
 		_like->setVisible(_likeShown);
@@ -4260,13 +4283,13 @@ void ComposeControls::updateControlsVisibility() {
 		_replaceMedia->show();
 	}
 	if (_attachToggle) {
-		SWITCH_BUTTON(_attachToggle, visibility.attach);
+		SWITCH_BUTTON(_attachToggle, settings.showAttachButtonInMessageField() && !_replaceMedia);
 	}
 	if (_silent) {
-		_silent->setVisible(visibility.silent);
+		_silent->setVisible(!hide);
 	}
 	if (_scheduled) {
-		_scheduled->setVisible(visibility.scheduled);
+		_scheduled->setVisible(!isEditingMessage() && !hide);
 	}
 	if (_commentsShown) {
 		_commentsShown->setVisible(!_commentsShownHidden.current());
@@ -4274,20 +4297,22 @@ void ComposeControls::updateControlsVisibility() {
 	if (_starsReaction) {
 		_starsReaction->show();
 	}
-	SWITCH_BUTTON(_tabbedSelectorToggle, visibility.emoji);
+	SWITCH_BUTTON(_tabbedSelectorToggle, settings.showEmojiButtonInMessageField());
 	if (_ttlInfo) {
-		_ttlInfo->setVisible(visibility.ttl);
+		_ttlInfo->setVisible(
+			!hide && settings.showAutoDeleteButtonInMessageField());
 	}
 	updateAiButtonVisibility();
 	updateSendAsFileVisibility();
 	updateExpandButtonVisibility();
+	updateDiscardRichDraftVisibility();
 }
 
 void ComposeControls::updateAiButtonVisibility() {
 	const auto hidden = !hasEnoughLinesForAi()
-		|| _wrap->isHidden()
+		|| !_wrap->isVisible()
 		|| _recording.current()
-		|| _field->isHidden();
+		|| !_field->isVisible();
 	if (_aiButton->isHidden() == hidden) {
 		return;
 	}
@@ -4309,9 +4334,9 @@ void ComposeControls::updateExpandButtonVisibility() {
 	const auto composeEligible = (_mode == Mode::Scheduled)
 		|| ((_mode == Mode::Normal) && hasRichDraftThreadScope())
 		|| isShortcutComposeEligible();
-	const auto hidden = _wrap->isHidden()
+	const auto hidden = !_wrap->isVisible()
 		|| _recording.current()
-		|| _field->isHidden()
+		|| !_field->isVisible()
 		|| (!composeEligible && !isEditingMessage())
 		|| !hasEnoughLinesForExpand()
 		|| textExceedsMaxSize()
@@ -4331,16 +4356,40 @@ void ComposeControls::updateExpandButtonGeometry() {
 	_expand->move(QPoint(x, _field->y()) + st::historyAiComposeButtonPosition);
 }
 
+void ComposeControls::updateDiscardRichDraftVisibility() {
+	const auto top = _richDraftPreview->y()
+		+ st::historyAiComposeButtonPosition.y();
+	const auto hidden = !_wrap->isVisible()
+		|| _recording.current()
+		|| !shouldShowRichDraftPreview()
+		|| (top + _discardRichDraft->height() > _send->y());
+	if (_discardRichDraft->isHidden() != hidden) {
+		_discardRichDraft->setVisible(!hidden);
+	}
+	updateDiscardRichDraftGeometry();
+}
+
+void ComposeControls::updateDiscardRichDraftGeometry() {
+	if (_discardRichDraft->isHidden()) {
+		return;
+	}
+	const auto width = _attachToggle
+		? _attachToggle->width()
+		: _discardRichDraft->width();
+	const auto left = _attachToggle
+		? _attachToggle->x()
+		: _richDraftPreview->x();
+	const auto x = left + (width - _discardRichDraft->width()) / 2;
+	const auto y = _richDraftPreview->y()
+		+ st::historyAiComposeButtonPosition.y();
+	_discardRichDraft->move(x, y);
+}
+
 void ComposeControls::updateAiButtonGeometry() {
 	if (_aiButton->isHidden()) {
 		return;
 	}
-	const auto visibility = controlsVisibility();
-	const auto anchorLeft = visibility.replaceMedia
-		? _replaceMedia->x()
-		: visibility.attach
-		? _attachToggle->x()
-		: _field->x();
+	const auto anchorLeft = _attachToggle ? _attachToggle->x() : _field->x();
 	const auto x = anchorLeft - st::historyAiComposeButtonPosition.x();
 	const auto y = _field->y() + st::historyAiComposeButtonPosition.y();
 	_aiButton->move(x, y);
@@ -4374,12 +4423,7 @@ void ComposeControls::updateSendAsFileGeometry() {
 	if (!_sendAsFile || _sendAsFile->isHidden()) {
 		return;
 	}
-	const auto visibility = controlsVisibility();
-	const auto anchorLeft = visibility.replaceMedia
-		? _replaceMedia->x()
-		: visibility.attach
-		? _attachToggle->x()
-		: _field->x();
+	const auto anchorLeft = _attachToggle ? _attachToggle->x() : _field->x();
 	const auto x = anchorLeft - st::historyAiComposeButtonPosition.x();
 	const auto y = _field->y() + st::historyAiComposeButtonPosition.y();
 	_sendAsFile->move(x, y);
@@ -4966,7 +5010,7 @@ bool ComposeControls::handleCancelRequest() {
 }
 
 void ComposeControls::tryProcessKeyInput(not_null<QKeyEvent*> e) {
-	if (!_field->isHidden() && !e->text().isEmpty()) {
+	if (_field->isVisible() && !e->text().isEmpty()) {
 		_field->setFocusFast();
 		QCoreApplication::sendEvent(_field->rawTextEdit(), e);
 	}
@@ -5293,7 +5337,7 @@ Fn<void()> ComposeControls::restoreTextCallback(
 }
 
 Ui::InputField *ComposeControls::fieldForMention() const {
-	return (_writeRestriction.current() || _field->isHidden())
+	return (_writeRestriction.current() || !_field->isVisible())
 		? nullptr
 		: _field.get();
 }

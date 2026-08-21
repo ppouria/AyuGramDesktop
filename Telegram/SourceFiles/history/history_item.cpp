@@ -478,7 +478,6 @@ HistoryItem::HistoryItem(
 	.shortcutId = data.vquick_reply_shortcut_id().value_or_empty(),
 	.starsPaid = int(data.vpaid_message_stars().value_or_empty()),
 	.effectId = data.veffect().value_or_empty(),
-	.ayuNoForwards = data.is_ayuNoforwards(),
 }) {
 	_boostsApplied = data.vfrom_boosts_applied().value_or_empty();
 
@@ -552,29 +551,18 @@ HistoryItem::HistoryItem(
 					[](const auto &) {});
 			}
 		}
-		if (!skipSetText) {
+		if (const auto richMessage = data.vrich_message()) {
+			const auto richPage = Iv::ParseRichPage(&history->session(), *richMessage);
+			setRichPage(richPage);
+			setText(Iv::FlattenRichPageSummary(richPage));
+		} else if (!skipSetText) {
 			auto textWithEntities = TextWithEntities{
 				qs(data.vmessage()),
 				Api::EntitiesFromMTP(
 					&history->session(),
 					data.ventities().value_or_empty())
 			};
-			if (const auto richMessage = data.vrich_message()) {
-				const auto richPage = Iv::ParseRichPage(
-					&history->session(),
-					*richMessage);
-				setRichPage(richPage);
-				auto summary = Iv::FlattenRichPageSummary(richPage, false);
-				setText(summary.empty()
-					? (_media
-						? std::move(textWithEntities)
-						: EnsureNonEmpty(textWithEntities))
-					: std::move(summary));
-			} else {
-				setText(_media
-					? std::move(textWithEntities)
-					: EnsureNonEmpty(textWithEntities));
-			}
+			setText(_media ? textWithEntities : EnsureNonEmpty(textWithEntities));
 		}
 		if (const auto groupedId = data.vgrouped_id()) {
 			setGroupId(
@@ -913,7 +901,6 @@ HistoryItem::HistoryItem(
 	? history->owner().peer(fields.from)
 	: history->peer)
 , _flags(FinalizeMessageFlags(history, fields.flags))
-, _ayuNoForwards(fields.ayuNoForwards)
 , _date(fields.date)
 , _starsPaid(fields.starsPaid)
 , _shortcutId(fields.shortcutId)
@@ -2150,7 +2137,7 @@ bool HistoryItem::isSponsored() const {
 }
 
 bool HistoryItem::isAyuNoForwards() const {
-	return _ayuNoForwards;
+	return _flags & MessageFlag::AyuNoForwards;
 }
 
 bool HistoryItem::canLookupMessageAuthor() const {
@@ -2578,7 +2565,6 @@ void HistoryItem::applySentMessage(const MTPDmessage &data) {
 }
 
 void HistoryItem::updateSentContent(const MTPDmessage &data) {
-	_ayuNoForwards = data.is_ayuNoforwards();
 	updateSentContent({
 		qs(data.vmessage()),
 		Api::EntitiesFromMTP(
@@ -3136,7 +3122,7 @@ bool HistoryItem::canStopPoll() const {
 }
 
 bool HistoryItem::forbidsForward() const {
-	return (_flags & MessageFlag::NoForwards);
+	return false;
 }
 
 bool HistoryItem::forbidsSaving() const {
@@ -4195,7 +4181,7 @@ void HistoryItem::applyTTL(TimeId destroyAt) {
 		const auto session = &_history->session();
 		crl::on_main(session, [session, id = fullId()]{
 			if (const auto item = session->data().message(id)) {
-				item->destroy();
+				processMessageDelete(item);
 			}
 		});
 	} else {

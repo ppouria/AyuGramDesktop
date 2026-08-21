@@ -25,15 +25,6 @@ add_subdirectory(codegen)
 add_subdirectory(lib_icu)
 # AyuGram filters
 
-if (MSVC)
-    target_compile_options(icu_regex_minimal PRIVATE /wd4996)
-else()
-    target_compile_options(icu_regex_minimal PRIVATE -Wno-deprecated-declarations)
-endif()
-if (APPLE)
-    target_compile_options(icu_regex_minimal PRIVATE -Wno-shorten-64-to-32)
-endif()
-
 get_filename_component(src_loc SourceFiles REALPATH)
 get_filename_component(res_loc Resources REALPATH)
 
@@ -132,12 +123,6 @@ set(ayugram_files
         ayu/utils/windows_utils.h
         ayu/utils/rc_manager.cpp
         ayu/utils/rc_manager.h
-        ayu/utils/taptic_engine/taptic_engine.cpp
-        ayu/utils/taptic_engine/taptic_engine.h
-        ayu/utils/taptic_engine/platform/taptic_engine_dummy.cpp
-        ayu/utils/taptic_engine/platform/taptic_engine_dummy.h
-        ayu/utils/taptic_engine/platform/taptic_engine_mac.mm
-        ayu/utils/taptic_engine/platform/taptic_engine_mac.h
         ayu/ui/ayu_logo.cpp
         ayu/ui/ayu_logo.h
         ayu/ui/toasts.cpp
@@ -219,12 +204,13 @@ set(ayugram_files
         ayu/libs/sqlite/sqlite3.c
         ayu/libs/sqlite/sqlite3.h
         ayu/libs/sqlite/sqlite_orm.h
-        ayu/features/streamer_mode/platform/streamer_mode_win.cpp
-        ayu/features/streamer_mode/platform/streamer_mode_win.h
-        ayu/features/streamer_mode/platform/streamer_mode_linux.cpp
-        ayu/features/streamer_mode/platform/streamer_mode_linux.h
-        ayu/features/streamer_mode/platform/streamer_mode_mac.mm
-        ayu/features/streamer_mode/platform/streamer_mode_mac.h
+        ayu/features/streamer_mode/platform/linux/streamer_mode_linux.cpp
+        ayu/features/streamer_mode/platform/linux/streamer_mode_linux.h
+        ayu/features/streamer_mode/platform/mac/streamer_mode_mac.mm
+        ayu/features/streamer_mode/platform/mac/streamer_mode_mac.h
+        ayu/features/streamer_mode/platform/win/streamer_mode_win.cpp
+        ayu/features/streamer_mode/platform/win/streamer_mode_win.h
+        ayu/features/streamer_mode/platform/platform_streamer_mode.h
         ayu/features/streamer_mode/streamer_mode.cpp
         ayu/features/streamer_mode/streamer_mode.h
         ayu/features/message_shot/message_shot.cpp
@@ -233,6 +219,8 @@ set(ayugram_files
         ayu/features/message_shot/message_shot_theme_state.h
         ayu/features/forward/ayu_forward.cpp
         ayu/features/forward/ayu_forward.h
+        ayu/features/forward/ayu_forward_rich.cpp
+        ayu/features/forward/ayu_forward_rich.h
         ayu/features/forward/ayu_sync.cpp
         ayu/features/forward/ayu_sync.h
         ayu/features/translator/ayu_translator.cpp
@@ -1527,8 +1515,6 @@ PRIVATE
     intro/intro_qr.h
     intro/intro_signup.cpp
     intro/intro_signup.h
-    intro/intro_start.cpp
-    intro/intro_start.h
     intro/intro_step.cpp
     intro/intro_step.h
     intro/intro_widget.cpp
@@ -1541,6 +1527,8 @@ PRIVATE
     iv/iv_delegate_impl.h
     iv/iv_instance.cpp
     iv/iv_instance.h
+    iv/iv_rich_message_html_export.cpp
+    iv/iv_rich_message_html_export.h
     iv/iv_rich_message_serializer.cpp
     iv/iv_rich_message_serializer.h
     iv/iv_rich_page.cpp
@@ -2291,6 +2279,7 @@ PRIVATE
     qrc/emoji_preview.qrc
     qrc/telegram/animations.qrc
     qrc/telegram/export.qrc
+    qrc/telegram/export_rich.qrc
     qrc/telegram/picker.qrc
     qrc/telegram/telegram.qrc
     qrc/telegram/sounds.qrc
@@ -2338,6 +2327,7 @@ elseif (APPLE)
     target_link_frameworks(Telegram PRIVATE CoreBluetooth)
     target_link_frameworks_weak(Telegram PRIVATE UserNotifications)
 
+    set(icons_path ${CMAKE_CURRENT_SOURCE_DIR}/Telegram/Images.xcassets)
     if (CMAKE_GENERATOR STREQUAL Xcode)
         set(ayugram_icons
             Default
@@ -2354,32 +2344,42 @@ elseif (APPLE)
             Extera2
         )
 
-#        set(ICON_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/IconOutput")
         foreach (icon ${ayugram_icons})
-#            add_custom_command(TARGET Telegram
-#                    PRE_LINK
-#                    COMMAND mkdir -p "${ICON_OUTPUT_DIR}"
-#                    COMMAND ${ACTOOL_EXECUTABLE}
-#                    "${CMAKE_CURRENT_SOURCE_DIR}/Telegram/AppIcon-${icon}.icon"
-#                    --compile "${ICON_OUTPUT_DIR}"
-#                    --app-icon AppIcon-${icon}
-#                    --enable-on-demand-resources NO
-#                    --development-region en
-#                    --target-device mac
-#                    --platform macosx
-#                    --minimum-deployment-target 10.13
-#                    --output-partial-info-plist /dev/null
-#                    --output-format human-readable-text
-#                    COMMENT "Compiling icon ${icon}"
-#                    COMMAND cp "${ICON_OUTPUT_DIR}/AppIcon-${icon}.icns" "$<TARGET_FILE_DIR:Telegram>/../Resources"
-#            )
-
-            # create resulting Assets.car with all icons
             target_add_resource(Telegram "${CMAKE_CURRENT_SOURCE_DIR}/Telegram/AppIcon-${icon}.icon")
             set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/Telegram/AppIcon-${icon}.icon" PROPERTIES
                     XCODE_EXPLICIT_FILE_TYPE "folder.iconcomposer.icon"
             )
         endforeach()
+    else()
+        set(icon_path ${icons_path}/Icon.iconset)
+        find_program(ICONUTIL iconutil)
+        find_program(PNG2ICNS png2icns)
+        if (ICONUTIL)
+            add_custom_command(
+                OUTPUT AppIcon-Default.icns
+                COMMAND ${ICONUTIL}
+                ARGS
+                    --convert icns
+                    --output AppIcon-Default.icns
+                    ${icon_path}
+            )
+        elseif (PNG2ICNS)
+            add_custom_command(
+                OUTPUT AppIcon-Default.icns
+                COMMAND ${PNG2ICNS}
+                ARGS
+                    AppIcon-Default.icns
+                    ${icon_path}/icon_16x16.png
+                    ${icon_path}/icon_32x32.png
+                    ${icon_path}/icon_128x128.png
+                    ${icon_path}/icon_256x256.png
+                    ${icon_path}/icon_512x512.png
+            )
+        endif()
+        if (ICONUTIL OR PNG2ICNS)
+            set_source_files_properties(AppIcon-Default.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+            target_add_resource(Telegram AppIcon-Default.icns)
+        endif()
     endif()
 
     set(lang_packs
@@ -2476,7 +2476,7 @@ set_target_properties(Telegram PROPERTIES
     XCODE_ATTRIBUTE_CURRENT_PROJECT_VERSION ${desktop_app_version_string}
     XCODE_ATTRIBUTE_PRODUCT_NAME ${output_name}
     XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME AppIcon-Default
-    XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES AppIcon-Alt AppIcon-Discord AppIcon-Spotify AppIcon-Extera AppIcon-Nothing AppIcon-Bard AppIcon-Yaplus AppIcon-Win95 AppIcon-Chibi AppIcon-Chibi2 AppIcon-Extera2
+    XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES "AppIcon-Alt AppIcon-Discord AppIcon-Spotify AppIcon-Extera AppIcon-Nothing AppIcon-Bard AppIcon-Yaplus AppIcon-Win95 AppIcon-Chibi AppIcon-Chibi2 AppIcon-Extera2"
     XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS YES
     XCODE_ATTRIBUTE_ENABLE_HARDENED_RUNTIME YES
     XCODE_ATTRIBUTE_COMBINE_HIDPI_IMAGES YES
@@ -2519,7 +2519,6 @@ if (MSVC)
     target_link_libraries(Telegram
     PRIVATE
         delayimp
-        dnsapi
     )
     target_link_options(Telegram
     PRIVATE

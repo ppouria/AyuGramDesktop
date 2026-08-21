@@ -7,12 +7,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "ui/userpic_view.h"
 
-#include "ayu/ui/ayu_userpic.h"
-#include "ui/image/image_prepare.h"
 #include "ui/empty_userpic.h"
 #include "ui/painter.h"
+#include "ui/image/image_prepare.h"
 
 #include <cmath>
+
+// AyuGram includes
+#include "ayu/ui/ayu_userpic.h"
+
 
 namespace Ui {
 namespace {
@@ -50,9 +53,7 @@ void PaintCommunityUserpicEffect(
 	const auto version = style::PaletteVersion();
 	const auto rgba = color.rgba();
 	const auto peek = size * kPeek;
-	const auto ayuOverride = AyuUserpic::ShouldOverrideShape(
-		PeerUserpicShape::Forum);
-	const auto ayuState = ayuOverride ? AyuUserpic::PackedState() : uint8(0);
+	const auto ayuState = AyuUserpic::PackedState();
 	const auto regenerate = cache.image.isNull()
 		|| (cache.size != size)
 		|| (cache.color != rgba)
@@ -79,9 +80,10 @@ void PaintCommunityUserpicEffect(
 		auto q = QPainter(&cache.image);
 		auto hq = PainterHighQualityEnabler(q);
 		const auto gap = size * kGap;
-		const auto userpicRadius = ayuOverride
+		const auto rounding = AyuUserpic::ShouldOverrideShape(
+			Ui::PeerUserpicShape::Forum)
 			? AyuUserpic::ComputeRadiusF(size)
-			: (size * Ui::ForumUserpicRadiusMultiplier());
+			: size * Ui::ForumUserpicRadiusMultiplier();
 
 		// The userpic and every card share a pivot on the userpic's left edge
 		// where its bottom-left rounding starts; each card is pinned there and
@@ -129,8 +131,8 @@ void PaintCommunityUserpicEffect(
 		q.setBrush(Qt::transparent);
 		q.drawRoundedRect(
 			QRectF(peek - gap, -gap, size + 2 * gap, size + 2 * gap),
-			userpicRadius + gap,
-			userpicRadius + gap);
+			rounding + gap,
+			rounding + gap);
 	}
 	p.drawImage(QPointF(x - peek, y), cache.image);
 }

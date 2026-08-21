@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "intro/intro_widget.h"
 
-#include "intro/intro_start.h"
 #include "intro/intro_phone.h"
 #include "intro/intro_qr.h"
 #include "intro/intro_code.h"
@@ -47,7 +46,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 #include "styles/style_intro.h"
 #include "base/qt/qt_common_adapters.h"
+
+// AyuGram includes
 #include "boxes/about_box.h"
+
 
 namespace Intro {
 namespace {
@@ -110,10 +112,6 @@ Widget::Widget(
 	}, lifetime());
 
 	switch (point) {
-	case EnterPoint::Start:
-		getNearestDC();
-		appendStep(new StartWidget(this, _account, getData()));
-		break;
 	case EnterPoint::Phone:
 		appendStep(new PhoneWidget(this, _account, getData()));
 		break;
@@ -909,7 +907,7 @@ void Widget::backRequested() {
 		Core::App().domain().activate(parent);
 	} else {
 		moveToStep(
-			Ui::CreateChild<StartWidget>(this, _account, getData()),
+			Ui::CreateChild<QrWidget>(this, _account, getData()),
 			StackAction::Replace,
 			Animate::Back);
 	}
